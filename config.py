@@ -30,3 +30,19 @@ SHADOW_BLUE_PATH = os.path.join(ASSETS_DIR, "shadow_blue.png")
 VINYL_YELLOW_PATH = os.path.join(ASSETS_DIR, "vinyl_yellow.png")
 SHADOW_YELLOW_PATH = os.path.join(ASSETS_DIR, "shadow_yellow.png")
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
+
+# ============================================================
+# نمط "ألبوم" (بطاقة غلاف مربعة + طرف القرص الأسود يدور خلفها)
+# ============================================================
+# صورة مرجعية توضيحية تظهر داخل رسالة "نمط آخر" (يعينها المطور من /dev)
+ALBUM_STYLE_IMAGE_PATH = os.path.join(ASSETS_DIR, "album_style_reference.jpg")
+
+# نسب التخطيط (كلها نسبة إلى DISC_SIZE) لتوليد فيديو نمط الألبوم
+ALBUM_COVER_RATIO = 0.72          # حجم بطاقة الغلاف المربعة
+ALBUM_COVER_CORNER_RATIO = 0.06   # استدارة زوايا بطاقة الغلاف (نسبة إلى حجمها)
+ALBUM_COVER_OFFSET_X_RATIO = 0.0  # إزاحة بطاقة الغلاف أفقيًا
+ALBUM_COVER_OFFSET_Y_RATIO = 0.12 # إزاحة بطاقة الغلاف عموديًا
+
+ALBUM_DISC_RATIO = 0.80           # قطر القرص الدوّار خلف البطاقة
+ALBUM_DISC_VISIBLE_RATIO = 0.42   # أي جزء من القرص يبقى ظاهر خارج البطاقة (أفقيًا)
+ALBUM_DISC_OFFSET_Y_RATIO = 0.10  # إزاحة القرص عموديًا
