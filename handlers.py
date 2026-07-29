@@ -57,6 +57,9 @@ from texts import (
     MSG_STYLE_CLASSIC_SAVED_ANSWER,
     MSG_DEV_SET_STYLE_IMAGE_PROMPT,
     MSG_STYLE_IMAGE_SAVED,
+    BTN_DEV_SET_DISC_LABEL,
+    MSG_DEV_SET_DISC_LABEL_PROMPT,
+    MSG_DISC_LABEL_SAVED,
     BTN_ADD_IMAGE,
     BTN_CANCEL,
     BTN_VINYL_PINK,
@@ -88,6 +91,7 @@ canceled_job_ids: set[str] = set()
 developer_vinyl_choice: dict[int, str] = {}
 user_style_choice: dict[int, str] = {}  # "album" أو غير موجود = كلاسيكي
 pending_dev_style_photo: set[int] = set()
+pending_dev_disc_label_photo: set[int] = set()
 
 
 HOURGLASS_FRAMES = ["⏳", "⌛"]
@@ -248,13 +252,21 @@ def get_user_style(user_id: int) -> str:
 
 def compute_album_layout(size: int) -> dict:
     cover_size = max(1, int(size * config.ALBUM_COVER_RATIO))
-    cover_x = int(size * config.ALBUM_COVER_OFFSET_X_RATIO)
-    cover_y = int(size * config.ALBUM_COVER_OFFSET_Y_RATIO)
-
     disc_size = max(1, int(size * config.ALBUM_DISC_RATIO))
     visible = disc_size * config.ALBUM_DISC_VISIBLE_RATIO
+
+    # عرض/ارتفاع كامل التركيبة (غلاف + جزء القرص البارز) قبل توسيطها بالقماشة
+    comp_width = cover_size + (disc_size - visible)
+    comp_height = max(cover_size, disc_size)
+
+    comp_x = int((size - comp_width) / 2)
+    comp_y = int((size - comp_height) / 2)
+
+    cover_x = comp_x
+    cover_y = comp_y + int((comp_height - cover_size) / 2)
+
     disc_x = int(cover_x + cover_size - (disc_size - visible))
-    disc_y = int(size * config.ALBUM_DISC_OFFSET_Y_RATIO)
+    disc_y = comp_y + int((comp_height - disc_size) / 2)
 
     return {
         "cover_size": cover_size,
@@ -322,8 +334,9 @@ async def process_job(bot: Bot, job: dict) -> None:
     audio_path = tmp(f"{uid}_{job_id}_audio.{audio.file_name.split('.')[-1] if audio.file_name else 'mp3'}")
     thumb_path = tmp(f"{uid}_{job_id}_thumb.jpg")
     disc_path = tmp(f"{uid}_{job_id}_disc.png")
+    disc_label_path = tmp(f"{uid}_{job_id}_disclabel.png")
     out_path = tmp(f"{uid}_{job_id}_out.mp4")
-    job["temp_paths"] = [audio_path, thumb_path, disc_path, out_path]
+    job["temp_paths"] = [audio_path, thumb_path, disc_path, disc_label_path, out_path]
 
     status = await message.reply(MSG_AUDIO_RECEIVED)
     animator = StatusAnimator(status)
@@ -364,9 +377,19 @@ async def process_job(bot: Bot, job: dict) -> None:
                 build_album_cover, thumb_path, disc_path,
                 layout["cover_size"], config.ALBUM_COVER_CORNER_RATIO,
             )
+
+            if os.path.exists(config.ALBUM_DISC_LABEL_PATH):
+                await asyncio.to_thread(
+                    build_disc, config.ALBUM_DISC_LABEL_PATH, get_developer_vinyl_path(uid),
+                    disc_label_path, config.HOLE_RATIO, layout["disc_size"],
+                )
+                album_disc_source = disc_label_path
+            else:
+                album_disc_source = get_developer_vinyl_path(uid)
+
             animator.set_stage(STAGE_RENDERING_VIDEO, percent=0)
             await render_album(
-                disc_path, get_developer_vinyl_path(uid), audio_path, out_path,
+                disc_path, album_disc_source, audio_path, out_path,
                 rotation_seconds=get_user_rotation_seconds(uid),
                 size=config.DISC_SIZE,
                 disc_size=layout["disc_size"], disc_x=layout["disc_x"], disc_y=layout["disc_y"],
@@ -444,6 +467,7 @@ async def on_dev(message: Message):
         [InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="vinyl:yellow")],
         [InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="vinyl:blue")],
         [InlineKeyboardButton(text=BTN_DEV_SET_STYLE_IMAGE, callback_data="dev_set_style_image")],
+        [InlineKeyboardButton(text=BTN_DEV_SET_DISC_LABEL, callback_data="dev_set_disc_label")],
     ])
     await message.reply(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=keyboard)
 
@@ -533,6 +557,14 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         await message.reply(MSG_STYLE_IMAGE_SAVED)
         return
 
+    if uid == config.DEVELOPER_ID and uid in pending_dev_disc_label_photo:
+        pending_dev_disc_label_photo.discard(uid)
+        photo = message.photo[-1]
+        os.makedirs(config.ASSETS_DIR, exist_ok=True)
+        await download_with_retries(bot, photo.file_id, config.ALBUM_DISC_LABEL_PATH, timeout_seconds=60, retries=2)
+        await message.reply(MSG_DISC_LABEL_SAVED)
+        return
+
     pending = pending_images.get(message.from_user.id)
     if not pending:
         return
@@ -589,6 +621,16 @@ async def on_dev_set_style_image(callback, bot: Bot):
         return
     pending_dev_style_photo.add(callback.from_user.id)
     await callback.message.reply(MSG_DEV_SET_STYLE_IMAGE_PROMPT)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "dev_set_disc_label")
+async def on_dev_set_disc_label(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    pending_dev_disc_label_photo.add(callback.from_user.id)
+    await callback.message.reply(MSG_DEV_SET_DISC_LABEL_PROMPT)
     await callback.answer()
 
 
