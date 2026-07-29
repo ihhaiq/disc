@@ -9,14 +9,15 @@ from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
-from compose import build_disc
-from processor import get_duration, render_vinyl
+from compose import build_disc, build_album_cover
+from processor import get_duration, render_vinyl, render_album
 import config
 from texts import (
     STAGE_PREPARING,
     STAGE_DOWNLOADING_AUDIO,
     STAGE_DOWNLOADING_THUMBNAIL,
     STAGE_BUILDING_DISC,
+    STAGE_BUILDING_ALBUM,
     STAGE_RENDERING_VIDEO,
     STAGE_UPLOADING_VIDEO,
     LOG_PROGRESS_UPDATE_FAILED,
@@ -48,12 +49,24 @@ from texts import (
     MSG_VINYL_CHOICE_SAVED_ANSWER,
     MSG_SPEED_SAVED_ANSWER,
     MSG_WRONG_TYPE,
+    MSG_STYLE_INTRO,
+    MSG_STYLE_INTRO_NO_IMAGE_NOTE,
+    MSG_STYLE_ALBUM_SAVED_EDIT,
+    MSG_STYLE_ALBUM_SAVED_ANSWER,
+    MSG_STYLE_CLASSIC_SAVED_EDIT,
+    MSG_STYLE_CLASSIC_SAVED_ANSWER,
+    MSG_DEV_SET_STYLE_IMAGE_PROMPT,
+    MSG_STYLE_IMAGE_SAVED,
     BTN_ADD_IMAGE,
     BTN_CANCEL,
     BTN_VINYL_PINK,
     BTN_VINYL_DEFAULT,
     BTN_VINYL_YELLOW,
     BTN_VINYL_BLUE,
+    BTN_STYLE_OTHER,
+    BTN_STYLE_ALBUM,
+    BTN_STYLE_CLASSIC,
+    BTN_DEV_SET_STYLE_IMAGE,
     SPEED_LABEL_FULL,
     SPEED_LABEL_8RPM,
     SPEED_LABEL_33RPM,
@@ -73,6 +86,8 @@ user_pending_jobs: dict[int, set[str]] = {}
 tracked_jobs: dict[str, dict] = {}
 canceled_job_ids: set[str] = set()
 developer_vinyl_choice: dict[int, str] = {}
+user_style_choice: dict[int, str] = {}  # "album" أو غير موجود = كلاسيكي
+pending_dev_style_photo: set[int] = set()
 
 
 HOURGLASS_FRAMES = ["⏳", "⌛"]
@@ -227,6 +242,30 @@ def get_user_rotation_seconds(user_id: int) -> float | None:
     return user_rotation_seconds.get(user_id, config.ROTATION_SECONDS)
 
 
+def get_user_style(user_id: int) -> str:
+    return user_style_choice.get(user_id, "classic")
+
+
+def compute_album_layout(size: int) -> dict:
+    cover_size = max(1, int(size * config.ALBUM_COVER_RATIO))
+    cover_x = int(size * config.ALBUM_COVER_OFFSET_X_RATIO)
+    cover_y = int(size * config.ALBUM_COVER_OFFSET_Y_RATIO)
+
+    disc_size = max(1, int(size * config.ALBUM_DISC_RATIO))
+    visible = disc_size * config.ALBUM_DISC_VISIBLE_RATIO
+    disc_x = int(cover_x + cover_size - (disc_size - visible))
+    disc_y = int(size * config.ALBUM_DISC_OFFSET_Y_RATIO)
+
+    return {
+        "cover_size": cover_size,
+        "cover_x": cover_x,
+        "cover_y": cover_y,
+        "disc_size": disc_size,
+        "disc_x": disc_x,
+        "disc_y": disc_y,
+    }
+
+
 def get_developer_vinyl_path(user_id: int) -> str:
     if user_id == config.DEVELOPER_ID:
         choice = developer_vinyl_choice.get(user_id)
@@ -278,6 +317,8 @@ async def process_job(bot: Bot, job: dict) -> None:
     uid = job["uid"]
     job_id = job["job_id"]
 
+    style = get_user_style(uid)
+
     audio_path = tmp(f"{uid}_{job_id}_audio.{audio.file_name.split('.')[-1] if audio.file_name else 'mp3'}")
     thumb_path = tmp(f"{uid}_{job_id}_thumb.jpg")
     disc_path = tmp(f"{uid}_{job_id}_disc.png")
@@ -310,24 +351,44 @@ async def process_job(bot: Bot, job: dict) -> None:
             await message.reply(MSG_DURATION_TOO_LONG_FMT.format(duration=duration))
 
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
-        animator.set_stage(STAGE_BUILDING_DISC)
-        await asyncio.to_thread(
-            build_disc, thumb_path, get_developer_vinyl_path(uid), disc_path,
-            config.HOLE_RATIO, config.DISC_SIZE,
-        )
 
         animator.set_stage(STAGE_RENDERING_VIDEO, percent=0)
 
         async def on_render_progress(percent: float) -> None:
             animator.set_stage(STAGE_RENDERING_VIDEO, percent=percent)
 
-        await render_vinyl(
-            disc_path, get_developer_shadow_path(uid), audio_path, out_path,
-            rotation_seconds=get_user_rotation_seconds(uid),
-            size=config.DISC_SIZE, fps=config.OUTPUT_FPS,
-            max_duration=config.MAX_DURATION_SECONDS,
-            on_progress=on_render_progress,
-        )
+        if style == "album":
+            animator.set_stage(STAGE_BUILDING_ALBUM)
+            layout = compute_album_layout(config.DISC_SIZE)
+            await asyncio.to_thread(
+                build_album_cover, thumb_path, disc_path,
+                layout["cover_size"], config.ALBUM_COVER_CORNER_RATIO,
+            )
+            animator.set_stage(STAGE_RENDERING_VIDEO, percent=0)
+            await render_album(
+                disc_path, get_developer_vinyl_path(uid), audio_path, out_path,
+                rotation_seconds=get_user_rotation_seconds(uid),
+                size=config.DISC_SIZE,
+                disc_size=layout["disc_size"], disc_x=layout["disc_x"], disc_y=layout["disc_y"],
+                cover_x=layout["cover_x"], cover_y=layout["cover_y"],
+                fps=config.OUTPUT_FPS, max_duration=config.MAX_DURATION_SECONDS,
+                on_progress=on_render_progress,
+            )
+        else:
+            animator.set_stage(STAGE_BUILDING_DISC)
+            await asyncio.to_thread(
+                build_disc, thumb_path, get_developer_vinyl_path(uid), disc_path,
+                config.HOLE_RATIO, config.DISC_SIZE,
+            )
+            animator.set_stage(STAGE_RENDERING_VIDEO, percent=0)
+            await render_vinyl(
+                disc_path, get_developer_shadow_path(uid), audio_path, out_path,
+                rotation_seconds=get_user_rotation_seconds(uid),
+                size=config.DISC_SIZE, fps=config.OUTPUT_FPS,
+                max_duration=config.MAX_DURATION_SECONDS,
+                on_progress=on_render_progress,
+            )
+
         if not os.path.exists(out_path):
             raise FileNotFoundError(ERR_OUTPUT_NOT_CREATED)
 
@@ -366,7 +427,11 @@ def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
             selected = current == (60 / float(value))
         mark = " ✅" if selected else ""
         buttons.append(InlineKeyboardButton(text=f"{label}{mark}", callback_data=f"speed:{value}"))
-    return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:]])
+
+    style_mark = " ✅" if get_user_style(user_id) == "album" else ""
+    style_row = [InlineKeyboardButton(text=f"{BTN_STYLE_OTHER}{style_mark}", callback_data="style_menu")]
+
+    return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:], style_row])
 
 
 @router.message(F.text == "/dev")
@@ -378,6 +443,7 @@ async def on_dev(message: Message):
         [InlineKeyboardButton(text=BTN_VINYL_DEFAULT, callback_data="vinyl:default")],
         [InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="vinyl:yellow")],
         [InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="vinyl:blue")],
+        [InlineKeyboardButton(text=BTN_DEV_SET_STYLE_IMAGE, callback_data="dev_set_style_image")],
     ])
     await message.reply(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=keyboard)
 
@@ -457,6 +523,16 @@ async def on_add_image(callback, bot: Bot):
 
 @router.message(F.photo)
 async def on_photo_for_audio(message: Message, bot: Bot):
+    uid = message.from_user.id if message.from_user else 0
+
+    if uid == config.DEVELOPER_ID and uid in pending_dev_style_photo:
+        pending_dev_style_photo.discard(uid)
+        photo = message.photo[-1]
+        os.makedirs(config.ASSETS_DIR, exist_ok=True)
+        await download_with_retries(bot, photo.file_id, config.ALBUM_STYLE_IMAGE_PATH, timeout_seconds=60, retries=2)
+        await message.reply(MSG_STYLE_IMAGE_SAVED)
+        return
+
     pending = pending_images.get(message.from_user.id)
     if not pending:
         return
@@ -504,6 +580,52 @@ async def on_vinyl_choice(callback, bot: Bot):
         developer_vinyl_choice.pop(callback.from_user.id, None)
     await callback.message.edit_text(MSG_VINYL_CHOICE_SAVED_EDIT)
     await callback.answer(MSG_VINYL_CHOICE_SAVED_ANSWER)
+
+
+@router.callback_query(F.data == "dev_set_style_image")
+async def on_dev_set_style_image(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    pending_dev_style_photo.add(callback.from_user.id)
+    await callback.message.reply(MSG_DEV_SET_STYLE_IMAGE_PROMPT)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "style_menu")
+async def on_style_menu(callback, bot: Bot):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_STYLE_ALBUM, callback_data="style:album")],
+        [InlineKeyboardButton(text=BTN_STYLE_CLASSIC, callback_data="style:classic")],
+    ])
+    if os.path.exists(config.ALBUM_STYLE_IMAGE_PATH):
+        await callback.message.answer_photo(
+            FSInputFile(config.ALBUM_STYLE_IMAGE_PATH),
+            caption=MSG_STYLE_INTRO,
+            reply_markup=keyboard,
+        )
+    else:
+        await callback.message.answer(
+            MSG_STYLE_INTRO + MSG_STYLE_INTRO_NO_IMAGE_NOTE,
+            reply_markup=keyboard,
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("style:"))
+async def on_style_choice(callback, bot: Bot):
+    choice = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id if callback.from_user else 0
+    if choice == "album":
+        user_style_choice[user_id] = "album"
+        await callback.message.edit_caption(caption=MSG_STYLE_ALBUM_SAVED_EDIT) \
+            if callback.message.photo else await callback.message.edit_text(MSG_STYLE_ALBUM_SAVED_EDIT)
+        await callback.answer(MSG_STYLE_ALBUM_SAVED_ANSWER)
+    else:
+        user_style_choice.pop(user_id, None)
+        await callback.message.edit_caption(caption=MSG_STYLE_CLASSIC_SAVED_EDIT) \
+            if callback.message.photo else await callback.message.edit_text(MSG_STYLE_CLASSIC_SAVED_EDIT)
+        await callback.answer(MSG_STYLE_CLASSIC_SAVED_ANSWER)
 
 
 @router.callback_query(F.data.startswith("speed:"))
