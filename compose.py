@@ -35,3 +35,26 @@ def build_disc(thumb_path: str, vinyl_path: str, out_path: str,
 
     vinyl.save(out_path)
     return out_path
+
+
+def build_album_cover(thumb_path: str, out_path: str, size: int,
+                       corner_ratio: float = 0.06) -> str:
+    """
+    يحوّل صورة المصغّرة (thumbnail) إلى بطاقة غلاف مربعة بزوايا مستديرة
+    على خلفية شفافة، لاستخدامها في نمط "ألبوم" (بدل وضعها داخل ثقب القرص).
+    """
+    cover = Image.open(thumb_path).convert("RGBA")
+    w, h = cover.size
+    m = min(w, h)
+    cover = cover.crop(((w - m) // 2, (h - m) // 2, (w - m) // 2 + m, (h - m) // 2 + m))
+    cover = cover.resize((size, size))
+
+    radius = max(1, int(size * corner_ratio))
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size, size), radius=radius, fill=255)
+    cover.putalpha(mask)
+
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    canvas.alpha_composite(cover, (0, 0))
+    canvas.save(out_path)
+    return out_path
