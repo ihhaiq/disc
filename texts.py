@@ -23,6 +23,7 @@ STAGE_PREPARING = "جاري التجهيز"
 STAGE_DOWNLOADING_AUDIO = "جارٍ تنزيل الملف الصوتي"
 STAGE_DOWNLOADING_THUMBNAIL = "جارٍ تنزيل صورة الغلاف"
 STAGE_BUILDING_DISC = "جارٍ بناء تصميم القرص"
+STAGE_BUILDING_ALBUM = "جارٍ بناء تصميم الألبوم"
 STAGE_RENDERING_VIDEO = "جارٍ تحويل الفيديو"
 STAGE_UPLOADING_VIDEO = "جارٍ رفع الفيديو وإرساله"
 
@@ -106,6 +107,35 @@ MSG_WRONG_TYPE = "📌 أرسل ملف صوتي (Audio) وليس فيديو أو
 
 
 # ============================================================
+# handlers.py - نمط "ألبوم" (Style: Album)
+# ============================================================
+MSG_STYLE_INTRO = (
+    "🎨 <b>نمط آخر: ألبوم</b>\n\n"
+    "بهذا النمط راح يظهر غلاف الأغنية (صورتك المصغّرة) كبطاقة مربعة بمقدمة الفيديو، "
+    "وخلفها يظهر طرف القرص الأسود وهو يدور، بدل ما تكون الصورة داخل ثقب القرص.\n\n"
+    "اختر:"
+)
+MSG_STYLE_INTRO_NO_IMAGE_NOTE = (
+    "\n\n⚠️ (لا توجد صورة مرجعية معروضة هنا بعد، لكن النمط شغّال)"
+)
+
+BTN_STYLE_ALBUM = "💿 ألبوم"
+BTN_STYLE_CLASSIC = "🔘 قرص كلاسيكي"
+
+MSG_STYLE_ALBUM_SAVED_EDIT = "💿 تم تفعيل نمط الألبوم لهذا المستخدم"
+MSG_STYLE_ALBUM_SAVED_ANSWER = "✅ تم اختيار نمط الألبوم"
+MSG_STYLE_CLASSIC_SAVED_EDIT = "🔘 تم تفعيل النمط الكلاسيكي (القرص الدوّار) لهذا المستخدم"
+MSG_STYLE_CLASSIC_SAVED_ANSWER = "✅ تم اختيار النمط الكلاسيكي"
+
+BTN_DEV_SET_STYLE_IMAGE = "🖼️ تعيين صورة نمط الألبوم"
+MSG_DEV_SET_STYLE_IMAGE_PROMPT = (
+    "📷 أرسل الآن صورة المرجع لنمط الألبوم (سيتم استخدامها فقط كصورة توضيحية "
+    "داخل رسالة \"نمط آخر\"، ولا تؤثر على تصميم فيديوهات المستخدمين)."
+)
+MSG_STYLE_IMAGE_SAVED = "✅ تم حفظ صورة نمط الألبوم"
+
+
+# ============================================================
 # handlers.py - نصوص الأزرار (Inline Keyboard buttons)
 # ============================================================
 BTN_ADD_IMAGE = "➕ إضافة صورة"
@@ -115,6 +145,8 @@ BTN_VINYL_PINK = "💗 استخدم وردي"
 BTN_VINYL_DEFAULT = "🔙 استخدم العادي"
 BTN_VINYL_YELLOW = "اللون الاصفر "
 BTN_VINYL_BLUE = " الازرق"
+
+BTN_STYLE_OTHER = "🎨 نمط آخر"
 
 SPEED_LABEL_FULL = "دورة كاملة"
 SPEED_LABEL_8RPM = "8 RPM"
