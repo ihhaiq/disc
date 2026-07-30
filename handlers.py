@@ -376,14 +376,20 @@ def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:4], [buttons[4]]])
 
 
-def build_vinyl_color_keyboard() -> InlineKeyboardMarkup:
+def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
+    current = developer_vinyl_choice.get(user_id)
+
+    def label(text: str, value: str) -> str:
+        is_selected = current == value or (current is None and value == "default")
+        return f"{text} ✅" if is_selected else text
+
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN_VINYL_BLACK, callback_data="vinyl:default")],
+        [InlineKeyboardButton(text=label(BTN_VINYL_BLACK, "default"), callback_data="vinyl:default")],
         [
-            InlineKeyboardButton(text=BTN_VINYL_PINK, callback_data="vinyl:pink"),
-            InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="vinyl:blue"),
+            InlineKeyboardButton(text=label(BTN_VINYL_PINK, "pink"), callback_data="vinyl:pink"),
+            InlineKeyboardButton(text=label(BTN_VINYL_BLUE, "blue"), callback_data="vinyl:blue"),
         ],
-        [InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="vinyl:yellow")],
+        [InlineKeyboardButton(text=label(BTN_VINYL_YELLOW, "yellow"), callback_data="vinyl:yellow")],
         [InlineKeyboardButton(text=BTN_BACK, callback_data="vinyl_menu:back")],
     ])
 
@@ -421,15 +427,16 @@ async def on_start(message: Message):
 
 @router.callback_query(F.data == "vinyl_menu:open")
 async def on_vinyl_menu_open(callback, bot: Bot):
+    user_id = callback.from_user.id if callback.from_user else 0
     if developer_menu_image_file_id:
         await callback.message.delete()
         await callback.message.answer_photo(
             developer_menu_image_file_id,
             caption=MSG_VINYL_COLOR_INFO,
-            reply_markup=build_vinyl_color_keyboard(),
+            reply_markup=build_vinyl_color_keyboard(user_id),
         )
     else:
-        await callback.message.edit_text(MSG_VINYL_COLOR_INFO, reply_markup=build_vinyl_color_keyboard())
+        await callback.message.edit_text(MSG_VINYL_COLOR_INFO, reply_markup=build_vinyl_color_keyboard(user_id))
     await callback.answer()
 
 
@@ -557,11 +564,12 @@ async def on_photo_for_audio(message: Message, bot: Bot):
 @router.callback_query(F.data.startswith("vinyl:"))
 async def on_vinyl_choice(callback, bot: Bot):
     choice = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id if callback.from_user else 0
     if choice in ("pink", "blue", "yellow"):
-        developer_vinyl_choice[callback.from_user.id] = choice
+        developer_vinyl_choice[user_id] = choice
     else:
-        developer_vinyl_choice.pop(callback.from_user.id, None)
-    await callback.message.edit_text(MSG_VINYL_CHOICE_SAVED_EDIT)
+        developer_vinyl_choice.pop(user_id, None)
+    await callback.message.edit_reply_markup(reply_markup=build_vinyl_color_keyboard(user_id))
     await callback.answer(MSG_VINYL_CHOICE_SAVED_ANSWER)
 
 
