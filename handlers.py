@@ -49,6 +49,9 @@ from texts import (
     MSG_VINYL_CHOICE_SAVED_ANSWER,
     MSG_SPEED_SAVED_ANSWER,
     MSG_WRONG_TYPE,
+    MSG_DEV_SEND_MENU_IMAGE,
+    MSG_DEV_MENU_IMAGE_SAVED,
+    BTN_DEV_SET_MENU_IMAGE,
     BTN_ADD_IMAGE,
     BTN_CANCEL,
     BTN_VINYL_PINK,
@@ -78,6 +81,8 @@ tracked_jobs: dict[str, dict] = {}
 canceled_job_ids: set[str] = set()
 developer_vinyl_choice: dict[int, str] = {}
 
+developer_menu_image_file_id: str | None = None
+awaiting_menu_image: set[int] = set()
 
 HOURGLASS_FRAMES = ["⏳", "⌛"]
 PROGRESS_BAR_WIDTH = 12
@@ -392,8 +397,19 @@ async def on_dev(message: Message):
         [InlineKeyboardButton(text=BTN_VINYL_DEFAULT, callback_data="vinyl:default")],
         [InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="vinyl:yellow")],
         [InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="vinyl:blue")],
+        [InlineKeyboardButton(text=BTN_DEV_SET_MENU_IMAGE, callback_data="vinyl_menu_image:set")],
     ])
     await message.reply(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "vinyl_menu_image:set")
+async def on_dev_set_menu_image(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    awaiting_menu_image.add(callback.from_user.id)
+    await callback.message.reply(MSG_DEV_SEND_MENU_IMAGE)
+    await callback.answer()
 
 
 @router.message(F.text.in_({"/start", "/help"}))
@@ -403,17 +419,28 @@ async def on_start(message: Message):
         reply_markup=build_speed_keyboard(message.from_user.id if message.from_user else 0),
     )
 
-
 @router.callback_query(F.data == "vinyl_menu:open")
 async def on_vinyl_menu_open(callback, bot: Bot):
-    await callback.message.edit_text(MSG_VINYL_COLOR_INFO, reply_markup=build_vinyl_color_keyboard())
+    if developer_menu_image_file_id:
+        await callback.message.delete()
+        await callback.message.answer_photo(
+            developer_menu_image_file_id,
+            caption=MSG_VINYL_COLOR_INFO,
+            reply_markup=build_vinyl_color_keyboard(),
+        )
+    else:
+        await callback.message.edit_text(MSG_VINYL_COLOR_INFO, reply_markup=build_vinyl_color_keyboard())
     await callback.answer()
 
 
 @router.callback_query(F.data == "vinyl_menu:back")
 async def on_vinyl_menu_back(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
-    await callback.message.edit_text(MSG_START_HELP, reply_markup=build_speed_keyboard(user_id))
+    if developer_menu_image_file_id:
+        await callback.message.delete()
+        await callback.message.answer(MSG_START_HELP, reply_markup=build_speed_keyboard(user_id))
+    else:
+        await callback.message.edit_text(MSG_START_HELP, reply_markup=build_speed_keyboard(user_id))
     await callback.answer()
 
 
@@ -484,6 +511,14 @@ async def on_add_image(callback, bot: Bot):
 
 @router.message(F.photo)
 async def on_photo_for_audio(message: Message, bot: Bot):
+    global developer_menu_image_file_id
+    uid = message.from_user.id if message.from_user else 0
+    if uid == config.DEVELOPER_ID and uid in awaiting_menu_image:
+        awaiting_menu_image.discard(uid)
+        developer_menu_image_file_id = message.photo[-1].file_id
+        await message.reply(MSG_DEV_MENU_IMAGE_SAVED)
+        return
+
     pending = pending_images.get(message.from_user.id)
     if not pending:
         return
