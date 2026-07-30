@@ -33,6 +33,7 @@ from texts import (
     MSG_DURATION_TOO_LONG_FMT,
     MSG_PROCESSING_ERROR_FMT,
     MSG_DEV_CHOOSE_TEMPLATE,
+    MSG_VINYL_COLOR_INFO,
     MSG_START_HELP,
     MSG_TEMPLATE_FILES_MISSING,
     MSG_NO_THUMBNAIL_PROMPT,
@@ -54,6 +55,9 @@ from texts import (
     BTN_VINYL_DEFAULT,
     BTN_VINYL_YELLOW,
     BTN_VINYL_BLUE,
+    BTN_VINYL_COLOR_MENU,
+    BTN_VINYL_BLACK,
+    BTN_BACK,
     SPEED_LABEL_FULL,
     SPEED_LABEL_8RPM,
     SPEED_LABEL_33RPM,
@@ -228,27 +232,24 @@ def get_user_rotation_seconds(user_id: int) -> float | None:
 
 
 def get_developer_vinyl_path(user_id: int) -> str:
-    if user_id == config.DEVELOPER_ID:
-        choice = developer_vinyl_choice.get(user_id)
-        if choice == "pink":
-            return config.VINYL_PINK_PATH
-        if choice == "yellow":
-            return config.VINYL_YELLOW_PATH
-        if choice == "blue":
-            return config.VINYL_BLUE_PATH
+    choice = developer_vinyl_choice.get(user_id)
+    if choice == "pink":
+        return config.VINYL_PINK_PATH
+    if choice == "yellow":
+        return config.VINYL_YELLOW_PATH
+    if choice == "blue":
+        return config.VINYL_BLUE_PATH
     return config.VINYL_PATH
-        
 
 
 def get_developer_shadow_path(user_id: int) -> str:
-    if user_id == config.DEVELOPER_ID:
-        choice = developer_vinyl_choice.get(user_id)
-        if choice == "pink":
-            return config.SHADOW_PINK_PATH
-        if choice == "yellow":
-            return config.SHADOW_YELLOW_PATH
-        if choice == "blue":
-            return config.SHADOW_BLUE_PATH
+    choice = developer_vinyl_choice.get(user_id)
+    if choice == "pink":
+        return config.SHADOW_PINK_PATH
+    if choice == "yellow":
+        return config.SHADOW_YELLOW_PATH
+    if choice == "blue":
+        return config.SHADOW_BLUE_PATH
     return config.SHADOW_PATH
 
 
@@ -366,7 +367,20 @@ def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
             selected = current == (60 / float(value))
         mark = " ✅" if selected else ""
         buttons.append(InlineKeyboardButton(text=f"{label}{mark}", callback_data=f"speed:{value}"))
-    return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:]])
+    buttons.append(InlineKeyboardButton(text=BTN_VINYL_COLOR_MENU, callback_data="vinyl_menu:open"))
+    return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:4], [buttons[4]]])
+
+
+def build_vinyl_color_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_VINYL_BLACK, callback_data="vinyl:default")],
+        [
+            InlineKeyboardButton(text=BTN_VINYL_PINK, callback_data="vinyl:pink"),
+            InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="vinyl:blue"),
+        ],
+        [InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="vinyl:yellow")],
+        [InlineKeyboardButton(text=BTN_BACK, callback_data="vinyl_menu:back")],
+    ])
 
 
 @router.message(F.text == "/dev")
@@ -388,6 +402,19 @@ async def on_start(message: Message):
         MSG_START_HELP,
         reply_markup=build_speed_keyboard(message.from_user.id if message.from_user else 0),
     )
+
+
+@router.callback_query(F.data == "vinyl_menu:open")
+async def on_vinyl_menu_open(callback, bot: Bot):
+    await callback.message.edit_text(MSG_VINYL_COLOR_INFO, reply_markup=build_vinyl_color_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "vinyl_menu:back")
+async def on_vinyl_menu_back(callback, bot: Bot):
+    user_id = callback.from_user.id if callback.from_user else 0
+    await callback.message.edit_text(MSG_START_HELP, reply_markup=build_speed_keyboard(user_id))
+    await callback.answer()
 
 
 @router.message(F.audio)
@@ -494,9 +521,6 @@ async def on_photo_for_audio(message: Message, bot: Bot):
 
 @router.callback_query(F.data.startswith("vinyl:"))
 async def on_vinyl_choice(callback, bot: Bot):
-    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
-        await callback.answer(MSG_DEV_ONLY_OPTION)
-        return
     choice = callback.data.split(":", 1)[1]
     if choice in ("pink", "blue", "yellow"):
         developer_vinyl_choice[callback.from_user.id] = choice
