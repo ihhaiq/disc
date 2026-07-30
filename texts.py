@@ -67,9 +67,9 @@ MSG_DEV_CHOOSE_TEMPLATE = "🎨 اختر قالب القرص للمطور فقط
 
 MSG_VINYL_COLOR_INFO = (
     "🎨 اختر لون القرص:\n"
-    "⚫ الأسود = التصميم الافتراضي\n"
-    "💗 وردي / 🔵 أزرق = لون بديل بنفس الشكل\n"
-    "🟡 أصفر = لون بديل ثالث"
+    "⚫ الأسود\n"
+    "💗 وردي /n 🔵 أزرق \n"
+    "🟡 أصفر"
 )
 
 MSG_DEV_SEND_MENU_IMAGE = "🖼️ أرسل الصورة اللي تريدها تظهر بقائمة اختيار اللون:"
@@ -122,13 +122,13 @@ MSG_WRONG_TYPE = "📌 أرسل ملف صوتي (Audio) وليس فيديو أو
 BTN_ADD_IMAGE = "➕ إضافة صورة"
 BTN_CANCEL = "❌ إلغاء"
 
-BTN_VINYL_PINK = "💗 استخدم وردي"
+BTN_VINYL_PINK = "💗  "
 BTN_VINYL_DEFAULT = "🔙 استخدم العادي"
-BTN_VINYL_YELLOW = "اللون الاصفر "
-BTN_VINYL_BLUE = " الازرق"
+BTN_VINYL_YELLOW = " 💛 "
+BTN_VINYL_BLUE = " 💙"
 
 BTN_VINYL_COLOR_MENU = "🎨 لون القرص"
-BTN_VINYL_BLACK = "⚫ الأسود"
+BTN_VINYL_BLACK = "🖤 "
 BTN_BACK = "🔙 رجوع"
 
 SPEED_LABEL_FULL = "دورة كاملة"
