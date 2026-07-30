@@ -61,6 +61,7 @@ from texts import (
     BTN_VINYL_COLOR_MENU,
     BTN_VINYL_BLACK,
     BTN_BACK,
+    BTN_VINYL_SILVER,
     SPEED_LABEL_FULL,
     SPEED_LABEL_8RPM,
     SPEED_LABEL_33RPM,
@@ -244,6 +245,8 @@ def get_developer_vinyl_path(user_id: int) -> str:
         return config.VINYL_YELLOW_PATH
     if choice == "blue":
         return config.VINYL_BLUE_PATH
+    if choice == "silver"
+        return config.VINYL_SILVER_PATH
     return config.VINYL_PATH
 
 
@@ -255,6 +258,8 @@ def get_developer_shadow_path(user_id: int) -> str:
         return config.SHADOW_YELLOW_PATH
     if choice == "blue":
         return config.SHADOW_BLUE_PATH
+    if choice == "silver":
+        return config.SHADOW_SILVER_PATH
     return config.SHADOW_PATH
 
 
@@ -389,8 +394,12 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=label(BTN_VINYL_PINK, "pink"), callback_data="vinyl:pink"),
             InlineKeyboardButton(text=label(BTN_VINYL_BLUE, "blue"), callback_data="vinyl:blue"),
         ],
-        [InlineKeyboardButton(text=label(BTN_VINYL_YELLOW, "yellow"), callback_data="vinyl:yellow")],
+        [
+            InlineKeyboardButton(text=label(BTN_VINYL_YELLOW, "yellow"), callback_data="vinyl:yellow")
+            InlineKeyboardButton(text=label(BTN_VINYL_SILVER, "silver"), callback_data="vinyl:silver"),
+        ],
         [InlineKeyboardButton(text=BTN_BACK, callback_data="vinyl_menu:back")],
+ 
     ])
 
 
@@ -565,7 +574,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
 async def on_vinyl_choice(callback, bot: Bot):
     choice = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id if callback.from_user else 0
-    if choice in ("pink", "blue", "yellow"):
+    if choice in ("pink", "blue", "yellow", "silver"):
         developer_vinyl_choice[user_id] = choice
     else:
         developer_vinyl_choice.pop(user_id, None)
