@@ -65,6 +65,8 @@ MSG_PROCESSING_ERROR_FMT = "❌ صار خطأ أثناء المعالجة:\n<cod
 
 MSG_DEV_CHOOSE_TEMPLATE = "🎨 اختر قالب القرص للمطور فقط:"
 
+MSG_VINYL_COLOR_INFO = "يمكن تخصيص الصورة من لوحة المطور"
+
 MSG_START_HELP = (
     "أرسل لي ملف صوتي (audio) يحتوي صورة مصغرة، "
     "وراح أرجع لك فيديو قرص دوّار (vinyl) بصورتك وصوتك."
@@ -115,6 +117,10 @@ BTN_VINYL_PINK = "💗 استخدم وردي"
 BTN_VINYL_DEFAULT = "🔙 استخدم العادي"
 BTN_VINYL_YELLOW = "اللون الاصفر "
 BTN_VINYL_BLUE = " الازرق"
+
+BTN_VINYL_COLOR_MENU = "🎨 لون القرص"
+BTN_VINYL_BLACK = "⚫ الأسود"
+BTN_BACK = "🔙 رجوع"
 
 SPEED_LABEL_FULL = "دورة كاملة"
 SPEED_LABEL_8RPM = "8 RPM"
