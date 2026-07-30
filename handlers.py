@@ -395,7 +395,7 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=label(BTN_VINYL_BLUE, "blue"), callback_data="vinyl:blue"),
         ],
         [
-            InlineKeyboardButton(text=label(BTN_VINYL_YELLOW, "yellow"), callback_data="vinyl:yellow")
+            InlineKeyboardButton(text=label(BTN_VINYL_YELLOW, "yellow"), callback_data="vinyl:yellow"),
             InlineKeyboardButton(text=label(BTN_VINYL_SILVER, "silver"), callback_data="vinyl:silver"),
         ],
         [InlineKeyboardButton(text=BTN_BACK, callback_data="vinyl_menu:back")],
