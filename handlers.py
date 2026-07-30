@@ -245,7 +245,7 @@ def get_developer_vinyl_path(user_id: int) -> str:
         return config.VINYL_YELLOW_PATH
     if choice == "blue":
         return config.VINYL_BLUE_PATH
-    if choice == "silver"
+    if choice == "silver":
         return config.VINYL_SILVER_PATH
     return config.VINYL_PATH
 
