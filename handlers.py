@@ -66,7 +66,21 @@ from texts import (
     SPEED_LABEL_8RPM,
     SPEED_LABEL_33RPM,
     SPEED_LABEL_45RPM,
+    MSG_CHOOSE_MODE,
+    BTN_QUICK_CREATE,
+    BTN_CUSTOMIZE,
+    MSG_WIZ_CHOOSE_COLOR,
+    MSG_WIZ_CHOOSE_SPEED,
+    MSG_WIZ_CHOOSE_IMAGE,
+    BTN_WIZ_SKIP_IMAGE,
+    MSG_WIZ_NO_IMAGE_TO_SKIP,
+    MSG_WIZ_CHOOSE_SEGMENT,
+    MSG_WIZ_STARTING,
+    MSG_WIZ_EXPIRED,
+    BTN_WIZ_SEGMENT_FMT,
+    MSG_QUICK_NEED_IMAGE,
 )
+import math
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -81,6 +95,8 @@ user_pending_jobs: dict[int, set[str]] = {}
 tracked_jobs: dict[str, dict] = {}
 canceled_job_ids: set[str] = set()
 developer_vinyl_choice: dict[int, str] = {}
+wizard_state: dict[int, dict] = {}
+WIZARD_TTL_SECONDS = 600
 
 developer_menu_image_file_id: str | None = None
 awaiting_menu_image: set[int] = set()
@@ -317,7 +333,7 @@ async def process_job(bot: Bot, job: dict) -> None:
             raise ValueError(ERR_NO_THUMBNAIL_AVAILABLE)
 
         duration = await get_duration(audio_path)
-        if duration > config.MAX_DURATION_SECONDS:
+        if duration > config.MAX_DURATION_SECONDS and not job.get("segment_start"):
             await message.reply(MSG_DURATION_TOO_LONG_FMT.format(duration=duration))
 
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
@@ -337,6 +353,7 @@ async def process_job(bot: Bot, job: dict) -> None:
             rotation_seconds=get_user_rotation_seconds(uid),
             size=config.DISC_SIZE, fps=config.OUTPUT_FPS,
             max_duration=config.MAX_DURATION_SECONDS,
+            start_offset=job.get("segment_start", 0.0),
             on_progress=on_render_progress,
         )
         if not os.path.exists(out_path):
@@ -467,48 +484,205 @@ async def on_audio(message: Message, bot: Bot):
         return
 
     audio = message.audio
-    if not audio.thumbnail:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=BTN_ADD_IMAGE, callback_data="add_image")],
-            [InlineKeyboardButton(text=BTN_CANCEL, callback_data="cancel_queue")],
-        ])
-        await message.reply(
-            MSG_NO_THUMBNAIL_PROMPT,
-            reply_markup=keyboard,
-        )
-        pending_audio[message.from_user.id] = {
-            "audio": audio,
-            "message": message,
-            "expires_at": time.time() + 300,
-            "job_id": uuid.uuid4().hex,
-            "uid": message.from_user.id if message.from_user else 0,
-        }
-        pending_images[message.from_user.id] = {"audio_message_id": message.message_id}
-        return
+    uid = message.from_user.id if message.from_user else 0
 
     if audio.file_size and audio.file_size > config.MAX_TELEGRAM_AUDIO_SIZE_BYTES:
         logger.info(LOG_FILE_TOO_LARGE)
 
-    uid = message.from_user.id if message.from_user else 0
-    job_id = uuid.uuid4().hex
-
-    await start_job_worker(bot)
-
-    job = {
-        "message": message,
+    pending_audio[uid] = {
         "audio": audio,
+        "message": message,
+        "expires_at": time.time() + WIZARD_TTL_SECONDS,
+        "job_id": uuid.uuid4().hex,
         "uid": uid,
-        "job_id": job_id,
     }
-    tracked_jobs[job_id] = job
-    user_pending_jobs.setdefault(uid, set()).add(job_id)
+    wizard_state.pop(uid, None)
+    pending_images.pop(uid, None)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_QUICK_CREATE, callback_data="mode:quick")],
+        [InlineKeyboardButton(text=BTN_CUSTOMIZE, callback_data="mode:custom")],
+        [InlineKeyboardButton(text=BTN_CANCEL, callback_data="cancel_queue")],
+    ])
+    await message.reply(MSG_CHOOSE_MODE, reply_markup=keyboard)
+
+
+def _get_pending_audio_or_none(uid: int) -> dict | None:
+    pending = pending_audio.get(uid)
+    if not pending or time.time() > pending["expires_at"]:
+        pending_audio.pop(uid, None)
+        wizard_state.pop(uid, None)
+        return None
+    return pending
+
+
+async def _launch_job(bot: Bot, uid: int, job: dict) -> None:
+    await start_job_worker(bot)
+    tracked_jobs[job["job_id"]] = job
+    user_pending_jobs.setdefault(uid, set()).add(job["job_id"])
     enqueue_job(job)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=BTN_CANCEL, callback_data="cancel_queue")]])
-    await message.reply(
-        MSG_JOB_QUEUED,
-        reply_markup=keyboard,
-    )
+
+@router.callback_query(F.data == "mode:quick")
+async def on_mode_quick(callback, bot: Bot):
+    uid = callback.from_user.id if callback.from_user else 0
+    pending = _get_pending_audio_or_none(uid)
+    if not pending:
+        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        return
+
+    audio = pending["audio"]
+    if audio.thumbnail:
+        pending_audio.pop(uid, None)
+        job = dict(pending)
+        job["segment_start"] = 0.0
+        await callback.message.edit_text(MSG_JOB_QUEUED)
+        await _launch_job(bot, uid, job)
+    else:
+        pending_images[uid] = {"quick_mode": True, "audio_message_id": pending["message"].message_id}
+        await callback.message.edit_text(MSG_QUICK_NEED_IMAGE)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "mode:custom")
+async def on_mode_custom(callback, bot: Bot):
+    uid = callback.from_user.id if callback.from_user else 0
+    pending = _get_pending_audio_or_none(uid)
+    if not pending:
+        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        return
+    wizard_state[uid] = {}
+    await callback.message.edit_text(MSG_WIZ_CHOOSE_COLOR, reply_markup=build_wiz_color_keyboard())
+    await callback.answer()
+
+
+def build_wiz_color_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=BTN_VINYL_BLACK, callback_data="wiz_color:default")],
+        [
+            InlineKeyboardButton(text=BTN_VINYL_PINK, callback_data="wiz_color:pink"),
+            InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="wiz_color:blue"),
+        ],
+        [
+            InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="wiz_color:yellow"),
+            InlineKeyboardButton(text=BTN_VINYL_SILVER, callback_data="wiz_color:silver"),
+        ],
+    ])
+
+
+def build_wiz_speed_keyboard() -> InlineKeyboardMarkup:
+    labels = [
+        (SPEED_LABEL_FULL, "full"),
+        (SPEED_LABEL_8RPM, "8"),
+        (SPEED_LABEL_33RPM, "33"),
+        (SPEED_LABEL_45RPM, "45"),
+    ]
+    buttons = [InlineKeyboardButton(text=label, callback_data=f"wiz_speed:{value}") for label, value in labels]
+    return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:]])
+
+
+def build_wiz_image_keyboard(has_thumbnail: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if has_thumbnail:
+        rows.append([InlineKeyboardButton(text=BTN_WIZ_SKIP_IMAGE, callback_data="wiz_image:skip")])
+    rows.append([InlineKeyboardButton(text=BTN_CANCEL, callback_data="cancel_queue")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_wiz_segment_keyboard(total_duration: float) -> InlineKeyboardMarkup:
+    minutes_count = max(1, math.ceil(total_duration / 60))
+    buttons = []
+    for i in range(minutes_count):
+        start = i * 60
+        if start >= total_duration:
+            break
+        buttons.append(InlineKeyboardButton(text=BTN_WIZ_SEGMENT_FMT.format(n=i + 1), callback_data=f"wiz_segment:{start}"))
+    rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("wiz_color:"))
+async def on_wiz_color(callback, bot: Bot):
+    uid = callback.from_user.id if callback.from_user else 0
+    state = wizard_state.get(uid)
+    if state is None or not _get_pending_audio_or_none(uid):
+        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        return
+    choice = callback.data.split(":", 1)[1]
+    if choice in ("pink", "blue", "yellow", "silver"):
+        developer_vinyl_choice[uid] = choice
+    else:
+        developer_vinyl_choice.pop(uid, None)
+    await callback.message.edit_text(MSG_WIZ_CHOOSE_SPEED, reply_markup=build_wiz_speed_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("wiz_speed:"))
+async def on_wiz_speed(callback, bot: Bot):
+    uid = callback.from_user.id if callback.from_user else 0
+    state = wizard_state.get(uid)
+    pending = _get_pending_audio_or_none(uid)
+    if state is None or not pending:
+        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        return
+    value = callback.data.split(":", 1)[1]
+    user_rotation_seconds[uid] = 0.0 if value == "full" else 60 / float(value)
+
+    has_thumb = bool(pending["audio"].thumbnail)
+    await callback.message.edit_text(MSG_WIZ_CHOOSE_IMAGE, reply_markup=build_wiz_image_keyboard(has_thumb))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "wiz_image:skip")
+async def on_wiz_image_skip(callback, bot: Bot):
+    uid = callback.from_user.id if callback.from_user else 0
+    pending = _get_pending_audio_or_none(uid)
+    state = wizard_state.get(uid)
+    if state is None or not pending:
+        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        return
+    if not pending["audio"].thumbnail:
+        await callback.answer(MSG_WIZ_NO_IMAGE_TO_SKIP, show_alert=True)
+        return
+    await _wiz_advance_to_segment_or_finish(bot, uid, callback.message, callback.message.edit_text)
+    await callback.answer()
+
+
+async def _wiz_advance_to_segment_or_finish(bot: Bot, uid: int, target_message: Message, send_func) -> None:
+    pending = pending_audio.get(uid)
+    if not pending:
+        return
+    audio = pending["audio"]
+    total_duration = audio.duration or 0
+
+    if total_duration <= config.MAX_DURATION_SECONDS:
+        await _finish_wizard(bot, uid, send_func, segment_start=0.0)
+        return
+
+    await send_func(MSG_WIZ_CHOOSE_SEGMENT, reply_markup=build_wiz_segment_keyboard(total_duration))
+
+
+@router.callback_query(F.data.startswith("wiz_segment:"))
+async def on_wiz_segment(callback, bot: Bot):
+    uid = callback.from_user.id if callback.from_user else 0
+    start_seconds = float(callback.data.split(":", 1)[1])
+    await _finish_wizard(bot, uid, callback.message.edit_text, segment_start=start_seconds)
+    await callback.answer()
+
+
+async def _finish_wizard(bot: Bot, uid: int, send_func, segment_start: float) -> None:
+    pending = pending_audio.pop(uid, None)
+    wizard_state.pop(uid, None)
+    if not pending:
+        await send_func(MSG_WIZ_EXPIRED)
+        return
+
+    job = dict(pending)
+    job["uid"] = uid
+    job["segment_start"] = segment_start
+
+    await send_func(MSG_WIZ_STARTING)
+    await _launch_job(bot, uid, job)
 
 
 @router.callback_query(F.data == "cancel_queue")
@@ -535,8 +709,41 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         await message.reply(MSG_DEV_MENU_IMAGE_SAVED)
         return
 
+    # صورة أثناء معالج التخصيص (wizard): تُستخدم كصورة غلاف جديدة ثم ننتقل لخطوة تحديد الجزء
+    if uid in wizard_state:
+        pending_entry = _get_pending_audio_or_none(uid)
+        if not pending_entry:
+            await message.reply(MSG_AUDIO_EXPIRED)
+            return
+        photo = message.photo[-1]
+        pending_entry["thumbnail_file_id"] = photo.file_id
+        await message.reply(MSG_IMAGE_RECEIVED)
+        await _wiz_advance_to_segment_or_finish(bot, uid, message, message.reply)
+        return
+
     pending = pending_images.get(message.from_user.id)
     if not pending:
+        return
+
+    # صورة أثناء "إنشاء سريع" لملف بدون صورة مصغرة: ننشئ فورًا بالإعدادات الافتراضية
+    if pending.get("quick_mode"):
+        photo = message.photo[-1]
+        pending_entry = _get_pending_audio_or_none(uid)
+        if not pending_entry:
+            pending_images.pop(uid, None)
+            await message.reply(MSG_AUDIO_EXPIRED)
+            return
+
+        pending_audio.pop(uid, None)
+        pending_images.pop(uid, None)
+
+        job = dict(pending_entry)
+        job["thumbnail_file_id"] = photo.file_id
+        job["uid"] = uid
+        job["segment_start"] = 0.0
+
+        await message.reply(MSG_IMAGE_RECEIVED)
+        await _launch_job(bot, uid, job)
         return
 
     if pending.get("waiting_for_image"):
@@ -560,6 +767,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         job["message"] = pending_entry["message"]
         job["uid"] = message.from_user.id if message.from_user else 0
         job["job_id"] = pending_entry["job_id"]
+        job["segment_start"] = 0.0
 
         pending_audio.pop(message.from_user.id, None)
         pending_images.pop(message.from_user.id, None)
