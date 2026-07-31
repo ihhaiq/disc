@@ -22,7 +22,7 @@ MAX_TELEGRAM_AUDIO_SIZE_BYTES = int(os.environ.get("MAX_TELEGRAM_AUDIO_SIZE_BYTE
 
 # رابط سيرفر Local Bot API (اختياري). لو محدد، يستخدمه البوت بدل api.telegram.org
    # للسماح بتنزيل ملفات أكبر (حتى 2GB بدل 20MB الافتراضية).
-   LOCAL_BOT_API_URL = os.environ.get("LOCAL_BOT_API_URL", "").strip() or None
+LOCAL_BOT_API_URL = os.environ.get("LOCAL_BOT_API_URL", "").strip() or None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
