@@ -55,9 +55,13 @@ async def render_vinyl(disc_path: str, shadow_path: str, audio_path: str,
                         out_path: str, rotation_seconds: float | None = 4,
                         size: int = 640, fps: int = 30,
                         max_duration: float = 60.0,
+                        start_offset: float = 0.0,
                         on_progress: ProgressCallback | None = None) -> str:
-    duration = await get_duration(audio_path)
-    duration = min(duration, max_duration)  # حد تليكرام لفيديو نوت الدائري
+    full_duration = await get_duration(audio_path)
+    # نتأكد أن نقطة البداية المختارة ضمن حدود الملف الفعلية
+    start_offset = max(0.0, min(start_offset, max(0.0, full_duration - 1)))
+    remaining = max(0.0, full_duration - start_offset)
+    duration = min(remaining, max_duration)  # حد تليكرام لفيديو نوت الدائري
 
     if rotation_seconds is None or rotation_seconds <= 0:
         rotation_seconds = duration if duration > 0 else 4
@@ -67,6 +71,7 @@ async def render_vinyl(disc_path: str, shadow_path: str, audio_path: str,
     trimmed_audio_path = audio_path + ".trim.mp3"
     trim_cmd = [
         "ffmpeg", "-y",
+        "-ss", str(start_offset),
         "-i", audio_path,
         "-vn",
         "-acodec", "libmp3lame",
