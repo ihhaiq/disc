@@ -21,7 +21,7 @@ async def main():
 
     session = None
     if config.LOCAL_BOT_API_URL:
-        local_server = TelegramAPIServer.from_base(config.LOCAL_BOT_API_URL)
+        local_server = TelegramAPIServer.from_base(config.LOCAL_BOT_API_URL, is_local=True)
         session = AiohttpSession(api=local_server)
         logging.info(f"يستخدم سيرفر Local Bot API: {config.LOCAL_BOT_API_URL}")
 
