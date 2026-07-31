@@ -18,10 +18,6 @@ HOLE_RATIO = float(os.environ.get("HOLE_RATIO", 0.42))
 
 MAX_DURATION_SECONDS = float(os.environ.get("MAX_DURATION_SECONDS", 60))  # حد تليكرام لفيديو نوت
 MAX_TELEGRAM_AUDIO_SIZE_BYTES = int(os.environ.get("MAX_TELEGRAM_AUDIO_SIZE_BYTES", 20 * 1024 * 1024))
-
-
-# رابط سيرفر Local Bot API (اختياري). لو محدد، يستخدمه البوت بدل api.telegram.org
-   # للسماح بتنزيل ملفات أكبر (حتى 2GB بدل 20MB الافتراضية).
 LOCAL_BOT_API_URL = os.environ.get("LOCAL_BOT_API_URL", "").strip() or None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
