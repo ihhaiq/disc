@@ -4,6 +4,8 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 
 import config
 from handlers import router
@@ -17,7 +19,13 @@ async def main():
     )
     os.makedirs(config.TEMP_DIR, exist_ok=True)
 
-    bot = Bot(config.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    session = None
+    if config.LOCAL_BOT_API_URL:
+        local_server = TelegramAPIServer.from_base(config.LOCAL_BOT_API_URL)
+        session = AiohttpSession(api=local_server)
+        logging.info(f"يستخدم سيرفر Local Bot API: {config.LOCAL_BOT_API_URL}")
+
+    bot = Bot(config.BOT_TOKEN, session=session, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
     dp.include_router(router)
 
