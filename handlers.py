@@ -565,7 +565,7 @@ def build_wiz_color_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="wiz_color:yellow"),
-            InlineKeyboardButton(text=BTN_VINYL_red, callback_data="wiz_color:red"),
+            InlineKeyboardButton(text=BTN_VINYL_RED, callback_data="wiz_color:red"),
         ],
     ])
 
