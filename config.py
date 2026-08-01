@@ -17,8 +17,21 @@ DISC_SIZE = int(os.environ.get("DISC_SIZE", 640))
 HOLE_RATIO = float(os.environ.get("HOLE_RATIO", 0.42))
 
 MAX_DURATION_SECONDS = float(os.environ.get("MAX_DURATION_SECONDS", 60))  # حد تليكرام لفيديو نوت
-MAX_TELEGRAM_AUDIO_SIZE_BYTES = int(os.environ.get("MAX_TELEGRAM_AUDIO_SIZE_BYTES", 20 * 1024 * 1024))
-LOCAL_BOT_API_URL = os.environ.get("LOCAL_BOT_API_URL", "").strip() or None
+
+# --- Local Bot API Server (telegram-bot-api) ---
+# لو محدد، البوت يتصل بسيرفر تليكرام محلي بدل api.telegram.org
+# عشان يرفع حد تنزيل/رفع الملفات من 20 ميجا إلى 2 جيجا.
+# API_ID / API_HASH يُستخدمان من طرف حاوية telegram-bot-api نفسها (سيرفس منفصل على Railway)،
+# مو من كود بايثون هذا مباشرة - لكن نتحقق من وجودهم هنا فقط للتأكد أن الإعداد مكتمل.
+API_ID = os.environ.get("API_ID", "")
+API_HASH = os.environ.get("API_HASH", "")
+LOCAL_BOT_API_URL = os.environ.get("LOCAL_BOT_API_URL", "").rstrip("/")
+USE_LOCAL_BOT_API = bool(LOCAL_BOT_API_URL)
+
+MAX_TELEGRAM_AUDIO_SIZE_BYTES = int(os.environ.get(
+    "MAX_TELEGRAM_AUDIO_SIZE_BYTES",
+    2 * 1024 * 1024 * 1024 if USE_LOCAL_BOT_API else 20 * 1024 * 1024,
+))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
@@ -30,6 +43,6 @@ SHADOW_PINK_PATH = os.path.join(ASSETS_DIR, "shadow_pink.png")
 SHADOW_BLUE_PATH = os.path.join(ASSETS_DIR, "shadow_blue.png")
 VINYL_YELLOW_PATH = os.path.join(ASSETS_DIR, "vinyl_yellow.png")
 SHADOW_YELLOW_PATH = os.path.join(ASSETS_DIR, "shadow_yellow.png")
-VINYL_red_PATH = os.path.join(ASSETS_DIR, "vinyl_red.png")
-SHADOW_red_PATH = os.path.join(ASSETS_DIR, "shadow_red.png")
+VINYL_SILVER_PATH = os.path.join(ASSETS_DIR, "vinyl_silver.png")
+SHADOW_SILVER_PATH = os.path.join(ASSETS_DIR, "shadow_silver.png")
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
