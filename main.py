@@ -22,7 +22,7 @@ async def main():
     session = None
     if config.USE_LOCAL_BOT_API:
         logging.info(LOG_USING_LOCAL_BOT_API, config.LOCAL_BOT_API_URL)
-        local_server = TelegramAPIServer.from_base(config.LOCAL_BOT_API_URL)
+        local_server = TelegramAPIServer.from_base(config.LOCAL_BOT_API_URL, is_local=True)
         session = AiohttpSession(api=local_server)
 
     bot = Bot(config.BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"), session=session)
