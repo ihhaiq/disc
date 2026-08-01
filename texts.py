@@ -149,6 +149,7 @@ BTN_VINYL_YELLOW = " 💛 "
 BTN_VINYL_BLUE = " 💙"
 BTN_VINYL_SILVER = "🩶" 
 BTN_VINYL_COLOR_MENU = "🎨 لون القرص"
+BTN_VINYL_RED = "❤️" 
 BTN_VINYL_BLACK = "🖤 "
 BTN_BACK = "🔙 رجوع"
 
