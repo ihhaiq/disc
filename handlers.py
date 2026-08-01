@@ -61,7 +61,7 @@ from texts import (
     BTN_VINYL_COLOR_MENU,
     BTN_VINYL_BLACK,
     BTN_BACK,
-    BTN_VINYL_red,
+    BTN_VINYL_RED,
     SPEED_LABEL_FULL,
     SPEED_LABEL_8RPM,
     SPEED_LABEL_33RPM,
