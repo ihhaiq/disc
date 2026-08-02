@@ -7,11 +7,15 @@ import uuid
 from aiogram import Router, F, Bot
 from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
+    LabeledPrice, PreCheckoutQuery,
+)
 
 from compose import build_disc
 from processor import get_duration, render_vinyl
 import config
+import limits
 from texts import (
     STAGE_PREPARING,
     STAGE_DOWNLOADING_AUDIO,
@@ -80,6 +84,15 @@ from texts import (
     MSG_WIZ_EXPIRED,
     BTN_WIZ_SEGMENT_FMT,
     MSG_QUICK_NEED_IMAGE,
+    MSG_LIMIT_REACHED_FMT,
+    BTN_BUY_STARS,
+    MSG_INVOICE_TITLE,
+    MSG_INVOICE_DESCRIPTION_FMT,
+    MSG_INVOICE_LABEL,
+    MSG_INVOICE_PAYLOAD_PREFIX,
+    MSG_PAYMENT_SUCCESS_FMT,
+    LOG_PAYMENT_RECORDED,
+    MSG_NEW_SUBSCRIBER_ADMIN_FMT,
 )
 import math
 
@@ -288,8 +301,20 @@ def get_job_priority(user_id: int) -> int:
     return 0 if user_id and user_id == config.DEVELOPER_ID else 1
 
 
+def build_buy_stars_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=BTN_BUY_STARS.format(price=config.STARS_SUBSCRIPTION_PRICE),
+            callback_data="buy_stars",
+        )],
+    ])
+
+
 def enqueue_job(job: dict) -> None:
-    if get_job_priority(job.get("uid", 0)) == 0:
+    uid = job.get("uid", 0)
+    if uid != config.DEVELOPER_ID:
+        limits.record_usage(uid)
+    if get_job_priority(uid) == 0:
         developer_job_queue.put_nowait(job)
     else:
         job_queue.put_nowait(job)
@@ -492,6 +517,19 @@ async def on_audio(message: Message, bot: Bot):
 
     audio = message.audio
     uid = message.from_user.id if message.from_user else 0
+
+    if uid != config.DEVELOPER_ID and not limits.can_create(uid):
+        hours = max(1, math.ceil(limits.get_reset_seconds(uid) / 3600))
+        await message.reply(
+            MSG_LIMIT_REACHED_FMT.format(
+                limit=limits.get_daily_limit(uid),
+                hours=hours,
+                premium_limit=config.PREMIUM_DAILY_LIMIT,
+                price=config.STARS_SUBSCRIPTION_PRICE,
+            ),
+            reply_markup=build_buy_stars_keyboard(),
+        )
+        return
 
     if audio.file_size and audio.file_size > config.MAX_TELEGRAM_AUDIO_SIZE_BYTES:
         logger.info(LOG_FILE_TOO_LARGE)
@@ -813,3 +851,48 @@ async def on_speed_selected(callback, bot: Bot):
 @router.message(F.video | F.voice | F.document)
 async def on_wrong_type(message: Message):
     await message.reply(MSG_WRONG_TYPE)
+
+
+@router.callback_query(F.data == "buy_stars")
+async def on_buy_stars(callback, bot: Bot):
+    uid = callback.from_user.id if callback.from_user else 0
+    await bot.send_invoice(
+        chat_id=callback.message.chat.id,
+        title=MSG_INVOICE_TITLE,
+        description=MSG_INVOICE_DESCRIPTION_FMT.format(limit=config.PREMIUM_DAILY_LIMIT),
+        payload=f"{MSG_INVOICE_PAYLOAD_PREFIX}_{uid}_{int(time.time())}",
+        provider_token="",  # فارغ إجباريًا لمدفوعات نجوم تليكرام (XTR)
+        currency="XTR",
+        prices=[LabeledPrice(label=MSG_INVOICE_LABEL, amount=config.STARS_SUBSCRIPTION_PRICE)],
+    )
+    await callback.answer()
+
+
+@router.pre_checkout_query()
+async def on_pre_checkout(pre_checkout_query: PreCheckoutQuery, bot: Bot):
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+
+@router.message(F.successful_payment)
+async def on_successful_payment(message: Message, bot: Bot):
+    uid = message.from_user.id if message.from_user else 0
+    limits.activate_subscription(uid, config.STARS_SUBSCRIPTION_DAYS)
+    logger.info(LOG_PAYMENT_RECORDED, uid)
+    await message.reply(MSG_PAYMENT_SUCCESS_FMT.format(limit=config.PREMIUM_DAILY_LIMIT))
+
+    if config.DEVELOPER_ID:
+        user = message.from_user
+        try:
+            await bot.send_message(
+                config.DEVELOPER_ID,
+                MSG_NEW_SUBSCRIBER_ADMIN_FMT.format(
+                    full_name=user.full_name if user else "-",
+                    username=f"@{user.username}" if user and user.username else "-",
+                    user_id=uid,
+                    amount=message.successful_payment.total_amount,
+                    days=config.STARS_SUBSCRIPTION_DAYS,
+                    limit=config.PREMIUM_DAILY_LIMIT,
+                ),
+            )
+        except Exception:
+            logger.exception("فشل إرسال إشعار المشترك الجديد للمطور")
