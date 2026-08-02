@@ -447,7 +447,7 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton(text=label(BTN_VINYL_GREEN, "green"), callback_data="vinyl:green")],
         [InlineKeyboardButton(text=BTN_BACK, callback_data="vinyl_menu:back")],
- 
+
     ])
 
 
@@ -511,14 +511,18 @@ async def on_vinyl_menu_back(callback, bot: Bot):
 @router.message(F.audio)
 async def on_audio(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
+    audio = message.audio
 
     if uid != config.DEVELOPER_ID and not limits.can_create(uid):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 اشترك للاستخدام غير المحدود", url=config.SUBSCRIBE_URL)],
-        ])
+        hours = max(1, math.ceil(limits.get_reset_seconds(uid) / 3600))
         await message.reply(
-            f"⚠️ وصلت للحد المجاني ({limits.FREE_LIMIT} ملفات). اشترك عشان تكمل بدون حدود.",
-            reply_markup=keyboard,
+            MSG_LIMIT_REACHED_FMT.format(
+                limit=limits.get_daily_limit(uid),
+                hours=hours,
+                premium_limit=config.PREMIUM_DAILY_LIMIT,
+                price=config.STARS_SUBSCRIPTION_PRICE,
+            ),
+            reply_markup=build_buy_stars_keyboard(),
         )
         return
 
