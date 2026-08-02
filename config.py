@@ -33,6 +33,12 @@ MAX_TELEGRAM_AUDIO_SIZE_BYTES = int(os.environ.get(
     2 * 1024 * 1024 * 1024 if USE_LOCAL_BOT_API else 20 * 1024 * 1024,
 ))
 
+# --- الحد اليومي لعدد الأقراص + اشتراك نجوم تليكرام ---
+FREE_DAILY_LIMIT = int(os.environ.get("FREE_DAILY_LIMIT", 3))          # عدد الأقراص المجانية كل 24 ساعة
+PREMIUM_DAILY_LIMIT = int(os.environ.get("PREMIUM_DAILY_LIMIT", 50))   # الحد بعد الاشتراك
+STARS_SUBSCRIPTION_PRICE = int(os.environ.get("STARS_SUBSCRIPTION_PRICE", 50))  # سعر الاشتراك بنجوم تليكرام
+STARS_SUBSCRIPTION_DAYS = int(os.environ.get("STARS_SUBSCRIPTION_DAYS", 30))    # مدة الاشتراك (يوم)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 VINYL_PATH = os.path.join(ASSETS_DIR, "vinyl.png")
