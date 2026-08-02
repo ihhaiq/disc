@@ -158,3 +158,40 @@ SPEED_LABEL_FULL = "دورة كاملة"
 SPEED_LABEL_8RPM = "8 RPM"
 SPEED_LABEL_33RPM = "33 RPM"
 SPEED_LABEL_45RPM = "45 RPM"
+
+# ============================================================
+# handlers.py / limits.py - الحد اليومي + اشتراك نجوم تليكرام
+# ============================================================
+MSG_LIMIT_REACHED_FMT = (
+    "🚫 وصلت للحد اليومي المجاني ({limit} أقراص كل 24 ساعة).\n"
+    "⏳ راح يتجدد الحد خلال {hours} ساعة تقريبًا.\n\n"
+    "⭐ أو اشترك الآن وارفع حدك اليومي إلى {premium_limit} قرص باليوم "
+    "مقابل {price} نجمة تليكرام شهريًا."
+)
+
+BTN_BUY_STARS = "⭐ اشتراك {price} نجمة / شهر"
+
+MSG_INVOICE_TITLE = "اشتراك شهري - رفع الحد اليومي"
+MSG_INVOICE_DESCRIPTION_FMT = (
+    "يرفع هذا الاشتراك حدك اليومي من إنشاء الأقراص إلى {limit} قرص كل 24 ساعة، "
+    "لمدة 30 يوم من لحظة الدفع."
+)
+MSG_INVOICE_LABEL = "اشتراك شهري"
+MSG_INVOICE_PAYLOAD_PREFIX = "sub"
+
+MSG_PAYMENT_SUCCESS_FMT = (
+    "✅ تم تفعيل الاشتراك بنجاح!\n"
+    "🔓 حدك اليومي الآن {limit} قرص كل 24 ساعة، لمدة 30 يوم."
+)
+
+LOG_PAYMENT_RECORDED = "تم تسجيل دفعة نجوم وتفعيل الاشتراك للمستخدم %s"
+
+MSG_NEW_SUBSCRIBER_ADMIN_FMT = (
+    "⭐ اشتراك جديد!\n\n"
+    "👤 الاسم: {full_name}\n"
+    "🔗 اليوزر: {username}\n"
+    "🆔 آيدي: {user_id}\n"
+    "💰 المبلغ: {amount} نجمة\n"
+    "📅 المدة: {days} يوم\n"
+    "🔓 الحد الجديد: {limit} قرص/يوم"
+)
