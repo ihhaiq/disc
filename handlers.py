@@ -265,7 +265,7 @@ def get_developer_vinyl_path(user_id: int) -> str:
     if choice == "red":
         return config.VINYL_RED_PATH
     if choice == "green":
-        return config.VINYL_GREEEN_PATH
+        return config.VINYL_GREEN_PATH
     return config.VINYL_PATH
 
 
@@ -280,7 +280,7 @@ def get_developer_shadow_path(user_id: int) -> str:
     if choice == "red":
         return config.SHADOW_RED_PATH
     if choice == "green":
-        return config.VINYL_GREEEN_PATH
+        return config.VINYL_GREEN_PATH
     return config.SHADOW_PATH
 
 
@@ -574,6 +574,7 @@ def build_wiz_color_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="wiz_color:yellow"),
             InlineKeyboardButton(text=BTN_VINYL_RED, callback_data="wiz_color:red"),
         ],
+        [InlineKeyboardButton(text=BTN_VINYL_GREEN, callback_data="wiz_color:green")],
     ])
 
 
