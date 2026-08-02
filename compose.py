@@ -9,11 +9,19 @@ def load_vinyl_template(vinyl_path: str, size: int = 640) -> Image.Image:
     template = Image.open(vinyl_path).convert("RGBA")
     if template.size != (size, size):
         template = template.resize((size, size))
+
+    # نفرض قناع دائري نظيف بغض النظر عن حواف الرسمة الأصلية (حتى لو ممزّقة/غير منتظمة)
+    # أو كون الملف الأصلي بلا قناة شفافية حقيقية إطلاقًا. هذا يضمن عدم تسرّب أي
+    # خلفية بيضاء عند أي زاوية دوران.
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+    template.putalpha(mask)
+
     return template
 
 
 def build_disc(thumb_path: str, vinyl_path: str, out_path: str,
-                hole_ratio: float = 0.42, size: int = 640) -> str:
+                hole_ratio: float = 0.44, size: int = 640) -> str:
     vinyl = load_vinyl_template(vinyl_path, size)
 
     hole_d = int(size * hole_ratio)
