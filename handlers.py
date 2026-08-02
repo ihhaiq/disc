@@ -293,7 +293,7 @@ def get_developer_shadow_path(user_id: int) -> str:
     if choice == "red":
         return config.SHADOW_RED_PATH
     if choice == "green":
-        return config.VINYL_GREEN_PATH
+        return config.SHADOW_GREEN_PATH
     return config.SHADOW_PATH
 
 
