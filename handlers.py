@@ -508,26 +508,17 @@ async def on_vinyl_menu_back(callback, bot: Bot):
         await callback.message.edit_text(MSG_START_HELP, reply_markup=build_speed_keyboard(user_id))
     await callback.answer()
 
-
 @router.message(F.audio)
 async def on_audio(message: Message, bot: Bot):
-    if not os.path.exists(config.VINYL_PATH) or not os.path.exists(config.SHADOW_PATH):
-        await message.reply(MSG_TEMPLATE_FILES_MISSING)
-        return
-
-    audio = message.audio
     uid = message.from_user.id if message.from_user else 0
 
     if uid != config.DEVELOPER_ID and not limits.can_create(uid):
-        hours = max(1, math.ceil(limits.get_reset_seconds(uid) / 3600))
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 اشترك للاستخدام غير المحدود", url=config.SUBSCRIBE_URL)],
+        ])
         await message.reply(
-            MSG_LIMIT_REACHED_FMT.format(
-                limit=limits.get_daily_limit(uid),
-                hours=hours,
-                premium_limit=config.PREMIUM_DAILY_LIMIT,
-                price=config.STARS_SUBSCRIPTION_PRICE,
-            ),
-            reply_markup=build_buy_stars_keyboard(),
+            f"⚠️ وصلت للحد المجاني ({limits.FREE_LIMIT} ملفات). اشترك عشان تكمل بدون حدود.",
+            reply_markup=keyboard,
         )
         return
 
