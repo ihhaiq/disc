@@ -114,6 +114,7 @@ WIZARD_TTL_SECONDS = 600
 
 developer_menu_image_file_id: str | None = None
 awaiting_menu_image: set[int] = set()
+awaiting_whitelist_add: set[int] = set()
 
 HOURGLASS_FRAMES = ["⏳", "⌛"]
 PROGRESS_BAR_WIDTH = 12
@@ -455,15 +456,101 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
 async def on_dev(message: Message):
     if not message.from_user or message.from_user.id != config.DEVELOPER_ID:
         return
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    await message.reply(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
+
+
+def build_dev_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN_VINYL_PINK, callback_data="vinyl:pink")],
         [InlineKeyboardButton(text=BTN_VINYL_DEFAULT, callback_data="vinyl:default")],
         [InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="vinyl:yellow")],
         [InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="vinyl:blue")],
         [InlineKeyboardButton(text=BTN_VINYL_GREEN, callback_data="vinyl:green")],
         [InlineKeyboardButton(text=BTN_DEV_SET_MENU_IMAGE, callback_data="vinyl_menu_image:set")],
+        [InlineKeyboardButton(text="🛡️ القائمة البيضاء", callback_data="dev_whitelist:open")],
     ])
-    await message.reply(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=keyboard)
+
+
+def build_whitelist_keyboard() -> InlineKeyboardMarkup:
+    ids = limits.list_whitelist()
+    rows = [
+        [InlineKeyboardButton(text=f"❌ إزالة {uid}", callback_data=f"dev_whitelist:remove:{uid}")]
+        for uid in ids
+    ]
+    rows.append([InlineKeyboardButton(text="➕ إضافة مستخدم", callback_data="dev_whitelist:add")])
+    rows.append([InlineKeyboardButton(text=BTN_BACK, callback_data="dev_whitelist:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _whitelist_text() -> str:
+    ids = limits.list_whitelist()
+    if not ids:
+        return "🛡️ القائمة البيضاء (مستثناة من كل الحدود اليومية):\n\nلا يوجد أحد حاليًا."
+    body = "\n".join(f"• {uid}" for uid in ids)
+    return f"🛡️ القائمة البيضاء (مستثناة من كل الحدود اليومية):\n\n{body}"
+
+
+@router.callback_query(F.data == "dev_whitelist:open")
+async def on_dev_whitelist_open(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    await callback.message.edit_text(_whitelist_text(), reply_markup=build_whitelist_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "dev_whitelist:add")
+async def on_dev_whitelist_add(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    awaiting_whitelist_add.add(callback.from_user.id)
+    await callback.message.reply(
+        "أرسل آيدي المستخدم (رقم) أو حوّل لي أي رسالة منه مباشرة."
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("dev_whitelist:remove:"))
+async def on_dev_whitelist_remove(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    target_id = int(callback.data.split(":", 2)[2])
+    limits.remove_whitelist(target_id)
+    await callback.message.edit_text(_whitelist_text(), reply_markup=build_whitelist_keyboard())
+    await callback.answer("تمت الإزالة ✅")
+
+
+@router.callback_query(F.data == "dev_whitelist:back")
+async def on_dev_whitelist_back(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    await callback.message.edit_text(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
+    await callback.answer()
+
+
+@router.message(lambda m: bool(m.from_user) and m.from_user.id in awaiting_whitelist_add)
+async def on_whitelist_target_input(message: Message, bot: Bot):
+    uid = message.from_user.id
+    awaiting_whitelist_add.discard(uid)
+
+    target_id = None
+    if message.forward_from:
+        target_id = message.forward_from.id
+    elif message.text and message.text.strip().lstrip("-").isdigit():
+        target_id = int(message.text.strip())
+
+    if target_id is None:
+        await message.reply(
+            "ما قدرت أفهم آيدي المستخدم. أرسل رقم آيدي صحيح، أو حوّل رسالة منه "
+            "(بشرط إعدادات الخصوصية عنده تسمح بإظهار هويته بالتحويل)."
+        )
+        return
+
+    limits.add_whitelist(target_id)
+    await message.reply(f"✅ تمت إضافة {target_id} للقائمة البيضاء.\n\n{_whitelist_text()}", reply_markup=build_whitelist_keyboard())
 
 
 @router.callback_query(F.data == "vinyl_menu_image:set")
