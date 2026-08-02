@@ -1,7 +1,9 @@
 """
-حدود الاستخدام اليومي المجاني + إدارة اشتراك نجوم تليكرام (Stars/XTR).
+حدود الاستخدام اليومي المجاني + إدارة اشتراك نجوم تليكرام (Stars/XTR)
++ القائمة البيضاء (استثناء أشخاص من كل القيود).
 
-يخزّن كل شيء بملف JSON بسيط داخل TEMP_DIR (ما يحتاج قاعدة بيانات).
+يخزّن كل شيء بملف JSON بسيط داخل config.DATA_DIR (لازم يكون مجلد دائم
+مربوط بـ Railway Volume، وإلا البيانات تنمسح مع كل ديبلوي).
 """
 
 import json
@@ -13,16 +15,19 @@ import config
 
 logger = logging.getLogger(__name__)
 
-_USAGE_FILE = os.path.join(config.TEMP_DIR, "usage_limits.json")
+_USAGE_FILE = os.path.join(config.DATA_DIR, "usage_limits.json")
 
 DAY_SECONDS = 24 * 60 * 60
 
 # البنية بالذاكرة:
 # {
 #   "123456": {"count": 2, "window_start": 1735900000.0, "premium_until": 0.0},
+#   "_whitelist": {"987654": {"added_at": 1735900000.0, "note": ""}},
 #   ...
 # }
 _data: dict[str, dict] = {}
+
+_WHITELIST_KEY = "_whitelist"
 
 
 def _load() -> None:
@@ -85,6 +90,8 @@ def get_count(uid: int) -> int:
 
 
 def can_create(uid: int) -> bool:
+    if is_whitelisted(uid):
+        return True
     return get_count(uid) < get_daily_limit(uid)
 
 
@@ -114,3 +121,33 @@ def activate_subscription(uid: int, days: int) -> None:
 def get_subscription_remaining_seconds(uid: int) -> float:
     e = _entry(uid)
     return max(0.0, e.get("premium_until", 0.0) - time.time())
+
+
+# --- القائمة البيضاء ---
+
+def _whitelist_dict() -> dict:
+    return _data.setdefault(_WHITELIST_KEY, {})
+
+
+def is_whitelisted(uid: int) -> bool:
+    return str(uid) in _whitelist_dict()
+
+
+def add_whitelist(uid: int, note: str = "") -> None:
+    wl = _whitelist_dict()
+    wl[str(uid)] = {"added_at": time.time(), "note": note}
+    _save()
+
+
+def remove_whitelist(uid: int) -> bool:
+    wl = _whitelist_dict()
+    existed = str(uid) in wl
+    wl.pop(str(uid), None)
+    if existed:
+        _save()
+    return existed
+
+
+def list_whitelist() -> list[int]:
+    wl = _whitelist_dict()
+    return [int(k) for k in wl.keys()]
