@@ -54,3 +54,9 @@ VINYL_GREEN_PATH = os.path.join(ASSETS_DIR, "vinyl_green.png")
 SHADOW_GREEN_PATH = os.path.join(ASSETS_DIR, "shadow_green.png")
 SHADOW_RED_PATH = os.path.join(ASSETS_DIR, "shadow_red.png")
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
+
+# --- مجلد التخزين الدائم (لازم يكون مربوط بـ Railway Volume) ---
+# يخزّن هنا حدود الاستخدام والاشتراكات والقائمة البيضاء عشان ما تنمسح مع كل ديبلوي.
+# لو ما ضبطت DATA_DIR كمتغير بيئة يشاور على مسار الـ Volume، البيانات بتضيع
+# مع أي إعادة نشر لأن باقي مجلدات المشروع مؤقتة وتتصفر مع كل Deploy.
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(BASE_DIR, "data"))
