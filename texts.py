@@ -151,6 +151,7 @@ BTN_VINYL_SILVER = "🩶"
 BTN_VINYL_COLOR_MENU = "🎨 لون القرص"
 BTN_VINYL_RED = "❤️" 
 BTN_VINYL_BLACK = "🖤 "
+BTN_VINYL_GREEN = "اخضر تجريبي"
 BTN_BACK = "🔙 رجوع"
 
 SPEED_LABEL_FULL = "دورة كاملة"
