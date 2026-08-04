@@ -19,84 +19,6 @@ from processor import get_duration, render_vinyl
 import config
 import limits
 import texts as texts_module
-from texts import (
-    STAGE_PREPARING,
-    STAGE_DOWNLOADING_AUDIO,
-    STAGE_DOWNLOADING_THUMBNAIL,
-    STAGE_BUILDING_DISC,
-    STAGE_RENDERING_VIDEO,
-    STAGE_UPLOADING_VIDEO,
-    LOG_PROGRESS_UPDATE_FAILED,
-    LOG_DELETE_FAILED_FMT,
-    LOG_DOWNLOAD_RETRY_FAILED_FMT,
-    LOG_NO_DETAIL_MESSAGE,
-    LOG_QUEUE_PROCESS_FAILED,
-    LOG_PROCESS_JOB_FAILED,
-    LOG_SEND_ERROR_FAILED,
-    LOG_FILE_TOO_LARGE,
-    ERR_NO_THUMBNAIL_AVAILABLE,
-    ERR_OUTPUT_NOT_CREATED,
-    MSG_AUDIO_RECEIVED,
-    MSG_DURATION_TOO_LONG_FMT,
-    MSG_PROCESSING_ERROR_FMT,
-    MSG_DEV_CHOOSE_TEMPLATE,
-    MSG_VINYL_COLOR_INFO,
-    MSG_START_HELP,
-    MSG_TEMPLATE_FILES_MISSING,
-    MSG_NO_THUMBNAIL_PROMPT,
-    MSG_JOB_QUEUED,
-    MSG_QUEUE_CANCELED_EDIT,
-    MSG_QUEUE_CANCELED_ANSWER,
-    MSG_SEND_IMAGE_NOW,
-    MSG_NO_PENDING_AUDIO,
-    MSG_AUDIO_EXPIRED,
-    MSG_IMAGE_RECEIVED,
-    MSG_DEV_ONLY_OPTION,
-    MSG_VINYL_CHOICE_SAVED_EDIT,
-    MSG_VINYL_CHOICE_SAVED_ANSWER,
-    MSG_SPEED_SAVED_ANSWER,
-    MSG_WRONG_TYPE,
-    MSG_DEV_SEND_MENU_IMAGE,
-    MSG_DEV_MENU_IMAGE_SAVED,
-    BTN_DEV_SET_MENU_IMAGE,
-    BTN_ADD_IMAGE,
-    BTN_CANCEL,
-    BTN_VINYL_PINK,
-    BTN_VINYL_DEFAULT,
-    BTN_VINYL_YELLOW,
-    BTN_VINYL_BLUE,
-    BTN_VINYL_COLOR_MENU,
-    BTN_VINYL_BLACK,
-    BTN_VINYL_GREEN,
-    BTN_BACK,
-    BTN_VINYL_RED,
-    SPEED_LABEL_FULL,
-    SPEED_LABEL_8RPM,
-    SPEED_LABEL_33RPM,
-    SPEED_LABEL_45RPM,
-    MSG_CHOOSE_MODE,
-    BTN_QUICK_CREATE,
-    BTN_CUSTOMIZE,
-    MSG_WIZ_CHOOSE_COLOR,
-    MSG_WIZ_CHOOSE_SPEED,
-    MSG_WIZ_CHOOSE_IMAGE,
-    BTN_WIZ_SKIP_IMAGE,
-    MSG_WIZ_NO_IMAGE_TO_SKIP,
-    MSG_WIZ_CHOOSE_SEGMENT,
-    MSG_WIZ_STARTING,
-    MSG_WIZ_EXPIRED,
-    BTN_WIZ_SEGMENT_FMT,
-    MSG_QUICK_NEED_IMAGE,
-    MSG_LIMIT_REACHED_FMT,
-    BTN_BUY_STARS,
-    MSG_INVOICE_TITLE,
-    MSG_INVOICE_DESCRIPTION_FMT,
-    MSG_INVOICE_LABEL,
-    MSG_INVOICE_PAYLOAD_PREFIX,
-    MSG_PAYMENT_SUCCESS_FMT,
-    LOG_PAYMENT_RECORDED,
-    MSG_NEW_SUBSCRIBER_ADMIN_FMT,
-)
 import math
 
 logger = logging.getLogger(__name__)
@@ -270,7 +192,7 @@ class StatusAnimator:
 
     def __init__(self, message: Message):
         self.message = message
-        self.stage_text = STAGE_PREPARING
+        self.stage_text = texts_module.STAGE_PREPARING
         self.percent: float | None = None
         self._frame = 0
         self._last_rendered: str | None = None
@@ -304,7 +226,7 @@ class StatusAnimator:
                 except TelegramBadRequest:
                     pass
                 except Exception:
-                    logger.exception(LOG_PROGRESS_UPDATE_FAILED)
+                    logger.exception(texts_module.LOG_PROGRESS_UPDATE_FAILED)
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=STATUS_UPDATE_INTERVAL_SECONDS)
             except asyncio.TimeoutError:
@@ -335,7 +257,7 @@ def cleanup(*paths: str) -> None:
             if p and os.path.exists(p):
                 os.remove(p)
         except OSError as e:
-            logger.warning(LOG_DELETE_FAILED_FMT.format(p=p, e=e))
+            logger.warning(texts_module.LOG_DELETE_FAILED_FMT.format(p=p, e=e))
 
 
 async def download_with_retries(bot: Bot, file_id: str, destination: str,
@@ -355,8 +277,8 @@ async def download_with_retries(bot: Bot, file_id: str, destination: str,
         except Exception as exc:
             last_error = exc
             logger.warning(
-                LOG_DOWNLOAD_RETRY_FAILED_FMT,
-                attempt, retries, type(exc).__name__, exc or LOG_NO_DETAIL_MESSAGE,
+                texts_module.LOG_DOWNLOAD_RETRY_FAILED_FMT,
+                attempt, retries, type(exc).__name__, exc or texts_module.LOG_NO_DETAIL_MESSAGE,
             )
             if attempt < retries:
                 await asyncio.sleep(2)
@@ -396,7 +318,7 @@ async def start_job_worker(bot: Bot) -> None:
                 tracked_jobs[job_id] = job
                 await process_job(bot, job)
             except Exception:
-                logger.exception(LOG_QUEUE_PROCESS_FAILED)
+                logger.exception(texts_module.LOG_QUEUE_PROCESS_FAILED)
             finally:
                 tracked_jobs.pop(job_id, None)
                 user_pending_jobs.get(job.get("uid", 0), set()).discard(job_id)
@@ -447,7 +369,7 @@ def get_job_priority(user_id: int) -> int:
 def build_buy_stars_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text=BTN_BUY_STARS.format(price=config.STARS_SUBSCRIPTION_PRICE),
+            text=texts_module.BTN_BUY_STARS.format(price=config.STARS_SUBSCRIPTION_PRICE),
             callback_data="buy_stars",
         )],
     ])
@@ -484,13 +406,13 @@ async def process_job(bot: Bot, job: dict) -> None:
     out_path = tmp(f"{uid}_{job_id}_out.mp4")
     job["temp_paths"] = [audio_path, thumb_path, disc_path, out_path]
 
-    status = await reply_with_premium_emoji(message, MSG_AUDIO_RECEIVED)
+    status = await reply_with_premium_emoji(message, texts_module.MSG_AUDIO_RECEIVED)
     animator = StatusAnimator(status)
     animator.start()
 
     try:
         await bot.send_chat_action(message.chat.id, action=ChatAction.RECORD_VIDEO_NOTE)
-        animator.set_stage(STAGE_DOWNLOADING_AUDIO)
+        animator.set_stage(texts_module.STAGE_DOWNLOADING_AUDIO)
         await download_with_retries(bot, audio.file_id, audio_path, timeout_seconds=300, retries=3)
 
         thumbnail_file_id = None
@@ -500,26 +422,26 @@ async def process_job(bot: Bot, job: dict) -> None:
             thumbnail_file_id = job["thumbnail_file_id"]
 
         if thumbnail_file_id:
-            animator.set_stage(STAGE_DOWNLOADING_THUMBNAIL)
+            animator.set_stage(texts_module.STAGE_DOWNLOADING_THUMBNAIL)
             await download_with_retries(bot, thumbnail_file_id, thumb_path, timeout_seconds=60, retries=2)
         else:
-            raise ValueError(ERR_NO_THUMBNAIL_AVAILABLE)
+            raise ValueError(texts_module.ERR_NO_THUMBNAIL_AVAILABLE)
 
         duration = await get_duration(audio_path)
         if duration > config.MAX_DURATION_SECONDS and not job.get("segment_start"):
-            await reply_with_premium_emoji(message, MSG_DURATION_TOO_LONG_FMT.format(duration=duration))
+            await reply_with_premium_emoji(message, texts_module.MSG_DURATION_TOO_LONG_FMT.format(duration=duration))
 
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
-        animator.set_stage(STAGE_BUILDING_DISC)
+        animator.set_stage(texts_module.STAGE_BUILDING_DISC)
         await asyncio.to_thread(
             build_disc, thumb_path, get_developer_vinyl_path(uid), disc_path,
             config.HOLE_RATIO, config.DISC_SIZE,
         )
 
-        animator.set_stage(STAGE_RENDERING_VIDEO, percent=0)
+        animator.set_stage(texts_module.STAGE_RENDERING_VIDEO, percent=0)
 
         async def on_render_progress(percent: float) -> None:
-            animator.set_stage(STAGE_RENDERING_VIDEO, percent=percent)
+            animator.set_stage(texts_module.STAGE_RENDERING_VIDEO, percent=percent)
 
         await render_vinyl(
             disc_path, get_developer_shadow_path(uid), audio_path, out_path,
@@ -530,18 +452,18 @@ async def process_job(bot: Bot, job: dict) -> None:
             on_progress=on_render_progress,
         )
         if not os.path.exists(out_path):
-            raise FileNotFoundError(ERR_OUTPUT_NOT_CREATED)
+            raise FileNotFoundError(texts_module.ERR_OUTPUT_NOT_CREATED)
 
-        animator.set_stage(STAGE_UPLOADING_VIDEO, percent=100)
+        animator.set_stage(texts_module.STAGE_UPLOADING_VIDEO, percent=100)
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
         await message.reply_video_note(FSInputFile(out_path), length=config.DISC_SIZE)
     except Exception as e:
-        logger.exception(LOG_PROCESS_JOB_FAILED)
+        logger.exception(texts_module.LOG_PROCESS_JOB_FAILED)
         error_text = str(e) or repr(e) or e.__class__.__name__
         try:
-            await reply_with_premium_emoji(message, MSG_PROCESSING_ERROR_FMT.format(error_text=error_text))
+            await reply_with_premium_emoji(message, texts_module.MSG_PROCESSING_ERROR_FMT.format(error_text=error_text))
         except Exception:
-            logger.exception(LOG_SEND_ERROR_FAILED)
+            logger.exception(texts_module.LOG_SEND_ERROR_FAILED)
     finally:
         await animator.stop()
         cleanup(audio_path, thumb_path, disc_path, out_path)
@@ -554,10 +476,10 @@ async def process_job(bot: Bot, job: dict) -> None:
 def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
     current = get_user_rotation_seconds(user_id)
     labels = [
-        (SPEED_LABEL_FULL, "full"),
-        (SPEED_LABEL_8RPM, "8"),
-        (SPEED_LABEL_33RPM, "33"),
-        (SPEED_LABEL_45RPM, "45"),
+        (texts_module.SPEED_LABEL_FULL, "full"),
+        (texts_module.SPEED_LABEL_8RPM, "8"),
+        (texts_module.SPEED_LABEL_33RPM, "33"),
+        (texts_module.SPEED_LABEL_45RPM, "45"),
     ]
     buttons = []
     for label, value in labels:
@@ -572,7 +494,7 @@ def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
             style="primary",
         ))
     buttons.append(InlineKeyboardButton(
-        text=BTN_VINYL_COLOR_MENU,
+        text=texts_module.BTN_VINYL_COLOR_MENU,
         callback_data="vinyl_menu:open",
         style="primary",
     ))
@@ -587,17 +509,17 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
         return f"{text} ✅" if is_selected else text
 
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=label(BTN_VINYL_BLACK, "default"), callback_data="vinyl:default")],
+        [InlineKeyboardButton(text=label(texts_module.BTN_VINYL_BLACK, "default"), callback_data="vinyl:default")],
         [
-            InlineKeyboardButton(text=label(BTN_VINYL_PINK, "pink"), callback_data="vinyl:pink"),
-            InlineKeyboardButton(text=label(BTN_VINYL_BLUE, "blue"), callback_data="vinyl:blue"),
+            InlineKeyboardButton(text=label(texts_module.BTN_VINYL_PINK, "pink"), callback_data="vinyl:pink"),
+            InlineKeyboardButton(text=label(texts_module.BTN_VINYL_BLUE, "blue"), callback_data="vinyl:blue"),
         ],
         [
-            InlineKeyboardButton(text=label(BTN_VINYL_YELLOW, "yellow"), callback_data="vinyl:yellow"),
-            InlineKeyboardButton(text=label(BTN_VINYL_RED, "red"), callback_data="vinyl:red"),
+            InlineKeyboardButton(text=label(texts_module.BTN_VINYL_YELLOW, "yellow"), callback_data="vinyl:yellow"),
+            InlineKeyboardButton(text=label(texts_module.BTN_VINYL_RED, "red"), callback_data="vinyl:red"),
         ],
-        [InlineKeyboardButton(text=label(BTN_VINYL_GREEN, "green"), callback_data="vinyl:green")],
-        [InlineKeyboardButton(text=BTN_BACK, callback_data="vinyl_menu:back")],
+        [InlineKeyboardButton(text=label(texts_module.BTN_VINYL_GREEN, "green"), callback_data="vinyl:green")],
+        [InlineKeyboardButton(text=texts_module.BTN_BACK, callback_data="vinyl_menu:back")],
 
     ])
 
@@ -606,17 +528,17 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
 async def on_dev(message: Message):
     if not message.from_user or message.from_user.id != config.DEVELOPER_ID:
         return
-    await message.reply(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
+    await message.reply(texts_module.MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
 
 
 def build_dev_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN_VINYL_PINK, callback_data="vinyl:pink")],
-        [InlineKeyboardButton(text=BTN_VINYL_DEFAULT, callback_data="vinyl:default")],
-        [InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="vinyl:yellow")],
-        [InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="vinyl:blue")],
-        [InlineKeyboardButton(text=BTN_VINYL_GREEN, callback_data="vinyl:green")],
-        [InlineKeyboardButton(text=BTN_DEV_SET_MENU_IMAGE, callback_data="vinyl_menu_image:set")],
+        [InlineKeyboardButton(text=texts_module.BTN_VINYL_PINK, callback_data="vinyl:pink")],
+        [InlineKeyboardButton(text=texts_module.BTN_VINYL_DEFAULT, callback_data="vinyl:default")],
+        [InlineKeyboardButton(text=texts_module.BTN_VINYL_YELLOW, callback_data="vinyl:yellow")],
+        [InlineKeyboardButton(text=texts_module.BTN_VINYL_BLUE, callback_data="vinyl:blue")],
+        [InlineKeyboardButton(text=texts_module.BTN_VINYL_GREEN, callback_data="vinyl:green")],
+        [InlineKeyboardButton(text=texts_module.BTN_DEV_SET_MENU_IMAGE, callback_data="vinyl_menu_image:set")],
         [InlineKeyboardButton(text="✏️ تحرير النصوص", callback_data="dev_text:page:0")],
         [InlineKeyboardButton(text="🛡️ القائمة البيضاء", callback_data="dev_whitelist:open")],
     ])
@@ -629,7 +551,7 @@ def build_whitelist_keyboard() -> InlineKeyboardMarkup:
         for uid in ids
     ]
     rows.append([InlineKeyboardButton(text="➕ إضافة مستخدم", callback_data="dev_whitelist:add")])
-    rows.append([InlineKeyboardButton(text=BTN_BACK, callback_data="dev_whitelist:back")])
+    rows.append([InlineKeyboardButton(text=texts_module.BTN_BACK, callback_data="dev_whitelist:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -674,7 +596,7 @@ def build_text_list_keyboard(page: int) -> InlineKeyboardMarkup:
     if nav_row:
         rows.append(nav_row)
 
-    rows.append([InlineKeyboardButton(text=BTN_BACK, callback_data="dev_text:back")])
+    rows.append([InlineKeyboardButton(text=texts_module.BTN_BACK, callback_data="dev_text:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -740,7 +662,7 @@ def update_text_variable(var_name: str, new_value: str) -> None:
 @router.callback_query(F.data == "dev_whitelist:open")
 async def on_dev_whitelist_open(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
-        await callback.answer(MSG_DEV_ONLY_OPTION)
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
     await callback.message.edit_text(_whitelist_text(), reply_markup=build_whitelist_keyboard())
     await callback.answer()
@@ -749,7 +671,7 @@ async def on_dev_whitelist_open(callback, bot: Bot):
 @router.callback_query(F.data == "dev_whitelist:add")
 async def on_dev_whitelist_add(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
-        await callback.answer(MSG_DEV_ONLY_OPTION)
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
     awaiting_whitelist_add.add(callback.from_user.id)
     await callback.message.reply(
@@ -761,7 +683,7 @@ async def on_dev_whitelist_add(callback, bot: Bot):
 @router.callback_query(F.data.startswith("dev_whitelist:remove:"))
 async def on_dev_whitelist_remove(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
-        await callback.answer(MSG_DEV_ONLY_OPTION)
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
     target_id = int(callback.data.split(":", 2)[2])
     limits.remove_whitelist(target_id)
@@ -772,9 +694,9 @@ async def on_dev_whitelist_remove(callback, bot: Bot):
 @router.callback_query(F.data == "dev_whitelist:back")
 async def on_dev_whitelist_back(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
-        await callback.answer(MSG_DEV_ONLY_OPTION)
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
-    await callback.message.edit_text(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
+    await callback.message.edit_text(texts_module.MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
     await callback.answer()
 
 
@@ -803,17 +725,17 @@ async def on_whitelist_target_input(message: Message, bot: Bot):
 @router.callback_query(F.data == "vinyl_menu_image:set")
 async def on_dev_set_menu_image(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
-        await callback.answer(MSG_DEV_ONLY_OPTION)
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
     awaiting_menu_image.add(callback.from_user.id)
-    await callback.message.reply(MSG_DEV_SEND_MENU_IMAGE)
+    await callback.message.reply(texts_module.MSG_DEV_SEND_MENU_IMAGE)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("dev_text:page:"))
 async def on_dev_text_page(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
-        await callback.answer(MSG_DEV_ONLY_OPTION)
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
     page = int(callback.data.split(":", 2)[2])
     dev_text_edit_page[callback.from_user.id] = page
@@ -824,7 +746,7 @@ async def on_dev_text_page(callback, bot: Bot):
 @router.callback_query(F.data.startswith("dev_text:edit:"))
 async def on_dev_text_edit(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
-        await callback.answer(MSG_DEV_ONLY_OPTION)
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
     var_name = callback.data.split(":", 2)[2]
     current_value = getattr(texts_module, var_name, None)
@@ -844,10 +766,10 @@ async def on_dev_text_edit(callback, bot: Bot):
 @router.callback_query(F.data == "dev_text:back")
 async def on_dev_text_back(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
-        await callback.answer(MSG_DEV_ONLY_OPTION)
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
     awaiting_text_value.pop(callback.from_user.id, None)
-    await callback.message.edit_text(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
+    await callback.message.edit_text(texts_module.MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
     await callback.answer()
 
 
@@ -886,7 +808,7 @@ async def on_text_value_input(message: Message, bot: Bot):
 @router.message(F.text.in_({"/start", "/help"}))
 async def on_start(message: Message):
     await message.reply(
-        MSG_START_HELP,
+        texts_module.MSG_START_HELP,
         reply_markup=build_speed_keyboard(message.from_user.id if message.from_user else 0),
     )
 
@@ -897,11 +819,11 @@ async def on_vinyl_menu_open(callback, bot: Bot):
         await callback.message.delete()
         await callback.message.answer_photo(
             developer_menu_image_file_id,
-            caption=MSG_VINYL_COLOR_INFO,
+            caption=texts_module.MSG_VINYL_COLOR_INFO,
             reply_markup=build_vinyl_color_keyboard(user_id),
         )
     else:
-        await callback.message.edit_text(MSG_VINYL_COLOR_INFO, reply_markup=build_vinyl_color_keyboard(user_id))
+        await callback.message.edit_text(texts_module.MSG_VINYL_COLOR_INFO, reply_markup=build_vinyl_color_keyboard(user_id))
     await callback.answer()
 
 
@@ -910,9 +832,9 @@ async def on_vinyl_menu_back(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
     if developer_menu_image_file_id:
         await callback.message.delete()
-        await callback.message.answer(MSG_START_HELP, reply_markup=build_speed_keyboard(user_id))
+        await callback.message.answer(texts_module.MSG_START_HELP, reply_markup=build_speed_keyboard(user_id))
     else:
-        await callback.message.edit_text(MSG_START_HELP, reply_markup=build_speed_keyboard(user_id))
+        await callback.message.edit_text(texts_module.MSG_START_HELP, reply_markup=build_speed_keyboard(user_id))
     await callback.answer()
 
 @router.message(F.audio)
@@ -923,7 +845,7 @@ async def on_audio(message: Message, bot: Bot):
     if uid != config.DEVELOPER_ID and not limits.can_create(uid):
         hours = max(1, math.ceil(limits.get_reset_seconds(uid) / 3600))
         await message.reply(
-            MSG_LIMIT_REACHED_FMT.format(
+            texts_module.MSG_LIMIT_REACHED_FMT.format(
                 limit=limits.get_daily_limit(uid),
                 hours=hours,
                 premium_limit=config.PREMIUM_DAILY_LIMIT,
@@ -934,7 +856,7 @@ async def on_audio(message: Message, bot: Bot):
         return
 
     if audio.file_size and audio.file_size > config.MAX_TELEGRAM_AUDIO_SIZE_BYTES:
-        logger.info(LOG_FILE_TOO_LARGE)
+        logger.info(texts_module.LOG_FILE_TOO_LARGE)
 
     pending_audio[uid] = {
         "audio": audio,
@@ -947,11 +869,11 @@ async def on_audio(message: Message, bot: Bot):
     pending_images.pop(uid, None)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN_QUICK_CREATE, callback_data="mode:quick")],
-        [InlineKeyboardButton(text=BTN_CUSTOMIZE, callback_data="mode:custom")],
-        [InlineKeyboardButton(text=BTN_CANCEL, callback_data="cancel_queue")],
+        [InlineKeyboardButton(text=texts_module.BTN_QUICK_CREATE, callback_data="mode:quick")],
+        [InlineKeyboardButton(text=texts_module.BTN_CUSTOMIZE, callback_data="mode:custom")],
+        [InlineKeyboardButton(text=texts_module.BTN_CANCEL, callback_data="cancel_queue")],
     ])
-    await message.reply(MSG_CHOOSE_MODE, reply_markup=keyboard)
+    await message.reply(texts_module.MSG_CHOOSE_MODE, reply_markup=keyboard)
 
 
 def _get_pending_audio_or_none(uid: int) -> dict | None:
@@ -975,7 +897,7 @@ async def on_mode_quick(callback, bot: Bot):
     uid = callback.from_user.id if callback.from_user else 0
     pending = _get_pending_audio_or_none(uid)
     if not pending:
-        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
         return
 
     audio = pending["audio"]
@@ -983,11 +905,11 @@ async def on_mode_quick(callback, bot: Bot):
         pending_audio.pop(uid, None)
         job = dict(pending)
         job["segment_start"] = 0.0
-        await edit_text_with_premium_emoji(callback.message, MSG_JOB_QUEUED)
+        await edit_text_with_premium_emoji(callback.message, texts_module.MSG_JOB_QUEUED)
         await _launch_job(bot, uid, job)
     else:
         pending_images[uid] = {"quick_mode": True, "audio_message_id": pending["message"].message_id}
-        await callback.message.edit_text(MSG_QUICK_NEED_IMAGE)
+        await callback.message.edit_text(texts_module.MSG_QUICK_NEED_IMAGE)
     await callback.answer()
 
 
@@ -996,34 +918,34 @@ async def on_mode_custom(callback, bot: Bot):
     uid = callback.from_user.id if callback.from_user else 0
     pending = _get_pending_audio_or_none(uid)
     if not pending:
-        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
         return
     wizard_state[uid] = {}
-    await callback.message.edit_text(MSG_WIZ_CHOOSE_COLOR, reply_markup=build_wiz_color_keyboard())
+    await callback.message.edit_text(texts_module.MSG_WIZ_CHOOSE_COLOR, reply_markup=build_wiz_color_keyboard())
     await callback.answer()
 
 
 def build_wiz_color_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN_VINYL_BLACK, callback_data="wiz_color:default")],
+        [InlineKeyboardButton(text=texts_module.BTN_VINYL_BLACK, callback_data="wiz_color:default")],
         [
-            InlineKeyboardButton(text=BTN_VINYL_PINK, callback_data="wiz_color:pink"),
-            InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="wiz_color:blue"),
+            InlineKeyboardButton(text=texts_module.BTN_VINYL_PINK, callback_data="wiz_color:pink"),
+            InlineKeyboardButton(text=texts_module.BTN_VINYL_BLUE, callback_data="wiz_color:blue"),
         ],
         [
-            InlineKeyboardButton(text=BTN_VINYL_YELLOW, callback_data="wiz_color:yellow"),
-            InlineKeyboardButton(text=BTN_VINYL_RED, callback_data="wiz_color:red"),
+            InlineKeyboardButton(text=texts_module.BTN_VINYL_YELLOW, callback_data="wiz_color:yellow"),
+            InlineKeyboardButton(text=texts_module.BTN_VINYL_RED, callback_data="wiz_color:red"),
         ],
-        [InlineKeyboardButton(text=BTN_VINYL_GREEN, callback_data="wiz_color:green")],
+        [InlineKeyboardButton(text=texts_module.BTN_VINYL_GREEN, callback_data="wiz_color:green")],
     ])
 
 
 def build_wiz_speed_keyboard() -> InlineKeyboardMarkup:
     labels = [
-        (SPEED_LABEL_FULL, "full"),
-        (SPEED_LABEL_8RPM, "8"),
-        (SPEED_LABEL_33RPM, "33"),
-        (SPEED_LABEL_45RPM, "45"),
+        (texts_module.SPEED_LABEL_FULL, "full"),
+        (texts_module.SPEED_LABEL_8RPM, "8"),
+        (texts_module.SPEED_LABEL_33RPM, "33"),
+        (texts_module.SPEED_LABEL_45RPM, "45"),
     ]
     buttons = [InlineKeyboardButton(text=label, callback_data=f"wiz_speed:{value}") for label, value in labels]
     return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:]])
@@ -1032,8 +954,8 @@ def build_wiz_speed_keyboard() -> InlineKeyboardMarkup:
 def build_wiz_image_keyboard(has_thumbnail: bool) -> InlineKeyboardMarkup:
     rows = []
     if has_thumbnail:
-        rows.append([InlineKeyboardButton(text=BTN_WIZ_SKIP_IMAGE, callback_data="wiz_image:skip")])
-    rows.append([InlineKeyboardButton(text=BTN_CANCEL, callback_data="cancel_queue")])
+        rows.append([InlineKeyboardButton(text=texts_module.BTN_WIZ_SKIP_IMAGE, callback_data="wiz_image:skip")])
+    rows.append([InlineKeyboardButton(text=texts_module.BTN_CANCEL, callback_data="cancel_queue")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1044,7 +966,7 @@ def build_wiz_segment_keyboard(total_duration: float) -> InlineKeyboardMarkup:
         start = i * 60
         if start >= total_duration:
             break
-        buttons.append(InlineKeyboardButton(text=BTN_WIZ_SEGMENT_FMT.format(n=i + 1), callback_data=f"wiz_segment:{start}"))
+        buttons.append(InlineKeyboardButton(text=texts_module.BTN_WIZ_SEGMENT_FMT.format(n=i + 1), callback_data=f"wiz_segment:{start}"))
     rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1054,14 +976,14 @@ async def on_wiz_color(callback, bot: Bot):
     uid = callback.from_user.id if callback.from_user else 0
     state = wizard_state.get(uid)
     if state is None or not _get_pending_audio_or_none(uid):
-        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
         return
     choice = callback.data.split(":", 1)[1]
     if choice in ("pink", "blue", "yellow", "red"):
         developer_vinyl_choice[uid] = choice
     else:
         developer_vinyl_choice.pop(uid, None)
-    await callback.message.edit_text(MSG_WIZ_CHOOSE_SPEED, reply_markup=build_wiz_speed_keyboard())
+    await callback.message.edit_text(texts_module.MSG_WIZ_CHOOSE_SPEED, reply_markup=build_wiz_speed_keyboard())
     await callback.answer()
 
 
@@ -1071,13 +993,13 @@ async def on_wiz_speed(callback, bot: Bot):
     state = wizard_state.get(uid)
     pending = _get_pending_audio_or_none(uid)
     if state is None or not pending:
-        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
         return
     value = callback.data.split(":", 1)[1]
     user_rotation_seconds[uid] = 0.0 if value == "full" else 60 / float(value)
 
     has_thumb = bool(pending["audio"].thumbnail)
-    await callback.message.edit_text(MSG_WIZ_CHOOSE_IMAGE, reply_markup=build_wiz_image_keyboard(has_thumb))
+    await callback.message.edit_text(texts_module.MSG_WIZ_CHOOSE_IMAGE, reply_markup=build_wiz_image_keyboard(has_thumb))
     await callback.answer()
 
 
@@ -1087,10 +1009,10 @@ async def on_wiz_image_skip(callback, bot: Bot):
     pending = _get_pending_audio_or_none(uid)
     state = wizard_state.get(uid)
     if state is None or not pending:
-        await callback.answer(MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
         return
     if not pending["audio"].thumbnail:
-        await callback.answer(MSG_WIZ_NO_IMAGE_TO_SKIP, show_alert=True)
+        await callback.answer(texts_module.MSG_WIZ_NO_IMAGE_TO_SKIP, show_alert=True)
         return
     await _wiz_advance_to_segment_or_finish(bot, uid, callback.message, callback.message.edit_text)
     await callback.answer()
@@ -1107,7 +1029,7 @@ async def _wiz_advance_to_segment_or_finish(bot: Bot, uid: int, target_message: 
         await _finish_wizard(bot, uid, send_func, segment_start=0.0)
         return
 
-    await send_func(MSG_WIZ_CHOOSE_SEGMENT, reply_markup=build_wiz_segment_keyboard(total_duration))
+    await send_func(texts_module.MSG_WIZ_CHOOSE_SEGMENT, reply_markup=build_wiz_segment_keyboard(total_duration))
 
 
 @router.callback_query(F.data.startswith("wiz_segment:"))
@@ -1122,31 +1044,31 @@ async def _finish_wizard(bot: Bot, uid: int, send_func, segment_start: float) ->
     pending = pending_audio.pop(uid, None)
     wizard_state.pop(uid, None)
     if not pending:
-        await send_func(MSG_WIZ_EXPIRED)
+        await send_func(texts_module.MSG_WIZ_EXPIRED)
         return
 
     job = dict(pending)
     job["uid"] = uid
     job["segment_start"] = segment_start
 
-    entities = build_premium_entities(MSG_WIZ_STARTING)
+    entities = build_premium_entities(texts_module.MSG_WIZ_STARTING)
     if entities:
-        await send_func(MSG_WIZ_STARTING, entities=entities)
+        await send_func(texts_module.MSG_WIZ_STARTING, entities=entities)
     else:
-        await send_func(MSG_WIZ_STARTING)
+        await send_func(texts_module.MSG_WIZ_STARTING)
     await _launch_job(bot, uid, job)
 
 
 @router.callback_query(F.data == "cancel_queue")
 async def on_cancel_queue(callback, bot: Bot):
     cancel_user_jobs(callback.from_user.id if callback.from_user else 0)
-    await callback.message.edit_text(MSG_QUEUE_CANCELED_EDIT)
-    await callback.answer(MSG_QUEUE_CANCELED_ANSWER)
+    await callback.message.edit_text(texts_module.MSG_QUEUE_CANCELED_EDIT)
+    await callback.answer(texts_module.MSG_QUEUE_CANCELED_ANSWER)
 
 
 @router.callback_query(F.data == "add_image")
 async def on_add_image(callback, bot: Bot):
-    await callback.message.reply(MSG_SEND_IMAGE_NOW)
+    await callback.message.reply(texts_module.MSG_SEND_IMAGE_NOW)
     pending_images[callback.from_user.id] = {"waiting_for_image": True}
     await callback.answer()
 
@@ -1158,18 +1080,18 @@ async def on_photo_for_audio(message: Message, bot: Bot):
     if uid == config.DEVELOPER_ID and uid in awaiting_menu_image:
         awaiting_menu_image.discard(uid)
         developer_menu_image_file_id = message.photo[-1].file_id
-        await message.reply(MSG_DEV_MENU_IMAGE_SAVED)
+        await message.reply(texts_module.MSG_DEV_MENU_IMAGE_SAVED)
         return
 
     # صورة أثناء معالج التخصيص (wizard): تُستخدم كصورة غلاف جديدة ثم ننتقل لخطوة تحديد الجزء
     if uid in wizard_state:
         pending_entry = _get_pending_audio_or_none(uid)
         if not pending_entry:
-            await message.reply(MSG_AUDIO_EXPIRED)
+            await message.reply(texts_module.MSG_AUDIO_EXPIRED)
             return
         photo = message.photo[-1]
         pending_entry["thumbnail_file_id"] = photo.file_id
-        await reply_with_premium_emoji(message, MSG_IMAGE_RECEIVED)
+        await reply_with_premium_emoji(message, texts_module.MSG_IMAGE_RECEIVED)
         await _wiz_advance_to_segment_or_finish(bot, uid, message, message.reply)
         return
 
@@ -1183,7 +1105,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         pending_entry = _get_pending_audio_or_none(uid)
         if not pending_entry:
             pending_images.pop(uid, None)
-            await message.reply(MSG_AUDIO_EXPIRED)
+            await message.reply(texts_module.MSG_AUDIO_EXPIRED)
             return
 
         pending_audio.pop(uid, None)
@@ -1194,7 +1116,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         job["uid"] = uid
         job["segment_start"] = 0.0
 
-        await reply_with_premium_emoji(message, MSG_IMAGE_RECEIVED)
+        await reply_with_premium_emoji(message, texts_module.MSG_IMAGE_RECEIVED)
         await _launch_job(bot, uid, job)
         return
 
@@ -1202,13 +1124,13 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         photo = message.photo[-1]
         pending_entry = pending_audio.get(message.from_user.id)
         if not pending_entry:
-            await message.reply(MSG_NO_PENDING_AUDIO)
+            await message.reply(texts_module.MSG_NO_PENDING_AUDIO)
             return
 
         if time.time() > pending_entry["expires_at"]:
             pending_audio.pop(message.from_user.id, None)
             pending_images.pop(message.from_user.id, None)
-            await message.reply(MSG_AUDIO_EXPIRED)
+            await message.reply(texts_module.MSG_AUDIO_EXPIRED)
             return
 
         pending_images[message.from_user.id] = {"photo_file_id": photo.file_id, "audio_message_id": pending.get("audio_message_id")}
@@ -1225,7 +1147,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         pending_images.pop(message.from_user.id, None)
 
         await start_job_worker(bot)
-        await reply_with_premium_emoji(message, MSG_IMAGE_RECEIVED)
+        await reply_with_premium_emoji(message, texts_module.MSG_IMAGE_RECEIVED)
         enqueue_job(job)
         return
 
@@ -1239,7 +1161,7 @@ async def on_vinyl_choice(callback, bot: Bot):
     else:
         developer_vinyl_choice.pop(user_id, None)
     await callback.message.edit_reply_markup(reply_markup=build_vinyl_color_keyboard(user_id))
-    await callback.answer(MSG_VINYL_CHOICE_SAVED_ANSWER)
+    await callback.answer(texts_module.MSG_VINYL_CHOICE_SAVED_ANSWER)
 
 
 @router.callback_query(F.data.startswith("speed:"))
@@ -1251,12 +1173,12 @@ async def on_speed_selected(callback, bot: Bot):
     else:
         user_rotation_seconds[user_id] = 60 / float(data)
     await callback.message.edit_reply_markup(reply_markup=build_speed_keyboard(user_id))
-    await callback.answer(MSG_SPEED_SAVED_ANSWER)
+    await callback.answer(texts_module.MSG_SPEED_SAVED_ANSWER)
 
 
 @router.message(F.video | F.voice | F.document)
 async def on_wrong_type(message: Message):
-    await message.reply(MSG_WRONG_TYPE)
+    await message.reply(texts_module.MSG_WRONG_TYPE)
 
 
 @router.callback_query(F.data == "buy_stars")
@@ -1264,12 +1186,12 @@ async def on_buy_stars(callback, bot: Bot):
     uid = callback.from_user.id if callback.from_user else 0
     await bot.send_invoice(
         chat_id=callback.message.chat.id,
-        title=MSG_INVOICE_TITLE,
-        description=MSG_INVOICE_DESCRIPTION_FMT.format(limit=config.PREMIUM_DAILY_LIMIT),
-        payload=f"{MSG_INVOICE_PAYLOAD_PREFIX}_{uid}_{int(time.time())}",
+        title=texts_module.MSG_INVOICE_TITLE,
+        description=texts_module.MSG_INVOICE_DESCRIPTION_FMT.format(limit=config.PREMIUM_DAILY_LIMIT),
+        payload=f"{texts_module.MSG_INVOICE_PAYLOAD_PREFIX}_{uid}_{int(time.time())}",
         provider_token="",  # فارغ إجباريًا لمدفوعات نجوم تليكرام (XTR)
         currency="XTR",
-        prices=[LabeledPrice(label=MSG_INVOICE_LABEL, amount=config.STARS_SUBSCRIPTION_PRICE)],
+        prices=[LabeledPrice(label=texts_module.MSG_INVOICE_LABEL, amount=config.STARS_SUBSCRIPTION_PRICE)],
     )
     await callback.answer()
 
@@ -1283,15 +1205,15 @@ async def on_pre_checkout(pre_checkout_query: PreCheckoutQuery, bot: Bot):
 async def on_successful_payment(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
     limits.activate_subscription(uid, config.STARS_SUBSCRIPTION_DAYS)
-    logger.info(LOG_PAYMENT_RECORDED, uid)
-    await reply_with_premium_emoji(message, MSG_PAYMENT_SUCCESS_FMT.format(limit=config.PREMIUM_DAILY_LIMIT))
+    logger.info(texts_module.LOG_PAYMENT_RECORDED, uid)
+    await reply_with_premium_emoji(message, texts_module.MSG_PAYMENT_SUCCESS_FMT.format(limit=config.PREMIUM_DAILY_LIMIT))
 
     if config.DEVELOPER_ID:
         user = message.from_user
         try:
             await bot.send_message(
                 config.DEVELOPER_ID,
-                MSG_NEW_SUBSCRIBER_ADMIN_FMT.format(
+                texts_module.MSG_NEW_SUBSCRIBER_ADMIN_FMT.format(
                     full_name=user.full_name if user else "-",
                     username=f"@{user.username}" if user and user.username else "-",
                     user_id=uid,
