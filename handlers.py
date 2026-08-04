@@ -763,9 +763,12 @@ async def on_dev_text_edit(callback, bot: Bot):
 
     awaiting_text_value[callback.from_user.id] = var_name
     preview = current_value if len(current_value) <= 500 else current_value[:500] + "…"
+    escaped_preview = html.escape(preview)
     await callback.message.reply(
-        f"📝 القيمة الحالية لـ <code>{var_name}</code>:\n\n{preview}\n\n"
-        "أرسل النص الجديد الآن ليحل محلها، أو أرسل /cancel_edit للإلغاء."
+        f"📝 القيمة الحالية لـ <code>{var_name}</code>:\n\n<code>{escaped_preview}</code>\n\n"
+        "أرسل النص الجديد الآن ليحل محلها. تقدر تحط إيموجي بريميوم بصيغة:\n"
+        "<code>&lt;tg-emoji emoji-id='123'&gt;😀&lt;/tg-emoji&gt;</code>\n"
+        "وسأتحقق منه قبل الحفظ. أو أرسل /cancel_edit للإلغاء."
     )
     await callback.answer()
 
@@ -796,6 +799,16 @@ async def on_text_value_input(message: Message, bot: Bot):
     var_name = awaiting_text_value.pop(uid)
     new_value = message.text or ""
 
+    html_error = await validate_html_text(bot, message.chat.id, new_value)
+    if html_error:
+        awaiting_text_value[uid] = var_name  # نرجّعه لنفس حالة الانتظار حتى يصحح النص
+        await message.reply(
+            "❌ النص فيه خطأ HTML/تاق إيموجي بريميوم ولن يُحفظ حتى يصير صحيحًا:\n"
+            f"<code>{html.escape(html_error)}</code>\n\n"
+            "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
+        )
+        return
+
     try:
         update_text_variable(var_name, new_value)
     except Exception as e:
@@ -804,7 +817,7 @@ async def on_text_value_input(message: Message, bot: Bot):
         return
 
     await message.reply(
-        f"✅ تم حفظ <code>{var_name}</code> بنجاح.\n"
+        f"✅ تم حفظ <code>{var_name}</code> بنجاح، وتم التحقق منه فعليًا بأنه HTML صالح.\n"
         "⚠️ التغيير مفعّل فورًا لأي كود يستخدم <code>texts_module.VAR_NAME</code> مباشرة، "
         "أما الأماكن اللي استوردت المتغيّر بالاسم مباشرة (from texts import ...) "
         "فتحتاج <b>إعادة تشغيل البوت</b> حتى يظهر فيها التغيير.",
@@ -814,7 +827,8 @@ async def on_text_value_input(message: Message, bot: Bot):
 
 @router.message(F.text.in_({"/start", "/help"}))
 async def on_start(message: Message):
-    await message.reply(
+    await safe_reply(
+        message,
         texts_module.MSG_START_HELP,
         reply_markup=build_speed_keyboard(message.from_user.id if message.from_user else 0),
     )
