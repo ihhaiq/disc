@@ -1,4 +1,5 @@
 import asyncio
+import ast
 import logging
 import os
 import time
@@ -17,6 +18,7 @@ from compose import build_disc
 from processor import get_duration, render_vinyl
 import config
 import limits
+import texts as texts_module
 from texts import (
     STAGE_PREPARING,
     STAGE_DOWNLOADING_AUDIO,
@@ -116,6 +118,12 @@ WIZARD_TTL_SECONDS = 600
 developer_menu_image_file_id: str | None = None
 awaiting_menu_image: set[int] = set()
 awaiting_whitelist_add: set[int] = set()
+
+# --- محرر النصوص (لوحة المطور) ---
+TEXTS_PER_PAGE = 5
+TEXTS_FILE_PATH = os.path.join(config.BASE_DIR, "texts.py")
+dev_text_edit_page: dict[int, int] = {}
+awaiting_text_value: dict[int, str] = {}
 
 HOURGLASS_FRAMES = ["⏳", "⌛"]
 PROGRESS_BAR_WIDTH = 12
@@ -609,6 +617,7 @@ def build_dev_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=BTN_VINYL_BLUE, callback_data="vinyl:blue")],
         [InlineKeyboardButton(text=BTN_VINYL_GREEN, callback_data="vinyl:green")],
         [InlineKeyboardButton(text=BTN_DEV_SET_MENU_IMAGE, callback_data="vinyl_menu_image:set")],
+        [InlineKeyboardButton(text="✏️ تحرير النصوص", callback_data="dev_text:page:0")],
         [InlineKeyboardButton(text="🛡️ القائمة البيضاء", callback_data="dev_whitelist:open")],
     ])
 
@@ -630,6 +639,102 @@ def _whitelist_text() -> str:
         return "🛡️ القائمة البيضاء (مستثناة من كل الحدود اليومية):\n\nلا يوجد أحد حاليًا."
     body = "\n".join(f"• {uid}" for uid in ids)
     return f"🛡️ القائمة البيضاء (مستثناة من كل الحدود اليومية):\n\n{body}"
+
+
+# ============================================================
+# محرر النصوص (لوحة المطور) — يعرض متغيرات texts.py بصفحات (5 بكل صفحة)
+# ============================================================
+def get_editable_text_names() -> list[str]:
+    """يرجع أسماء كل المتغيرات النصية القابلة للتحرير بملف texts.py، مرتبة أبجديًا."""
+    names = []
+    for name in dir(texts_module):
+        if name.startswith("_"):
+            continue
+        value = getattr(texts_module, name)
+        if isinstance(value, str) and name.isupper():
+            names.append(name)
+    return sorted(names)
+
+
+def build_text_list_keyboard(page: int) -> InlineKeyboardMarkup:
+    names = get_editable_text_names()
+    start = page * TEXTS_PER_PAGE
+    page_names = names[start:start + TEXTS_PER_PAGE]
+
+    rows = [
+        [InlineKeyboardButton(text=name, callback_data=f"dev_text:edit:{name}")]
+        for name in page_names
+    ]
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text="◀️ السابق", callback_data=f"dev_text:page:{page - 1}"))
+    if start + TEXTS_PER_PAGE < len(names):
+        nav_row.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"dev_text:page:{page + 1}"))
+    if nav_row:
+        rows.append(nav_row)
+
+    rows.append([InlineKeyboardButton(text=BTN_BACK, callback_data="dev_text:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _text_list_header(page: int) -> str:
+    names = get_editable_text_names()
+    total = len(names)
+    total_pages = max(1, math.ceil(total / TEXTS_PER_PAGE))
+    return f"✏️ تحرير النصوص — صفحة {page + 1}/{total_pages} ({total} متغيّر):"
+
+
+def update_text_variable(var_name: str, new_value: str) -> None:
+    """
+    يحدّث قيمة متغيّر نصي داخل ملف texts.py على القرص، بدون المساس بباقي الملف
+    (يحافظ على الشكل الأصلي حتى لو القيمة موزّعة على أسطر متعددة). يحدّث كمان
+    القيمة بالذاكرة الحالية (texts_module.VAR_NAME) حتى تنعكس فورًا على أي كود
+    يقرأ القيمة عبر texts_module.VAR_NAME مباشرة.
+
+    ملاحظة مهمة: الأماكن اللي سوّت `from texts import VAR_NAME` وقت إقلاع
+    البوت (وهذا حال أغلب handlers.py) تحتفظ بالقيمة القديمة بالذاكرة لحد ما
+    يعاد تشغيل البوت، رغم إن الملف على القرص والمتغيّر بموديول texts نفسه
+    يكونان محدّثين فورًا.
+    """
+    with open(TEXTS_FILE_PATH, "r", encoding="utf-8") as f:
+        source = f.read()
+
+    tree = ast.parse(source)
+    target_node = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name) and target.id == var_name:
+                target_node = node
+                break
+
+    if target_node is None:
+        raise ValueError(f"المتغيّر {var_name} غير موجود بملف texts.py")
+
+    value_node = target_node.value
+    start_line, start_col = value_node.lineno, value_node.col_offset
+    end_line, end_col = value_node.end_lineno, value_node.end_col_offset
+
+    lines = source.splitlines(keepends=True)
+    new_literal = repr(new_value)
+
+    if start_line == end_line:
+        line = lines[start_line - 1]
+        lines[start_line - 1] = line[:start_col] + new_literal + line[end_col:]
+    else:
+        first_line = lines[start_line - 1]
+        last_line = lines[end_line - 1]
+        merged = first_line[:start_col] + new_literal + last_line[end_col:]
+        lines[start_line - 1:end_line] = [merged]
+
+    new_source = "".join(lines)
+    ast.parse(new_source)  # تحقق سريع إن الملف الناتج صالح بايثونيًا قبل الحفظ
+
+    with open(TEXTS_FILE_PATH, "w", encoding="utf-8") as f:
+        f.write(new_source)
+
+    setattr(texts_module, var_name, new_value)
 
 
 @router.callback_query(F.data == "dev_whitelist:open")
@@ -703,6 +808,79 @@ async def on_dev_set_menu_image(callback, bot: Bot):
     awaiting_menu_image.add(callback.from_user.id)
     await callback.message.reply(MSG_DEV_SEND_MENU_IMAGE)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("dev_text:page:"))
+async def on_dev_text_page(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    page = int(callback.data.split(":", 2)[2])
+    dev_text_edit_page[callback.from_user.id] = page
+    await callback.message.edit_text(_text_list_header(page), reply_markup=build_text_list_keyboard(page))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("dev_text:edit:"))
+async def on_dev_text_edit(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    var_name = callback.data.split(":", 2)[2]
+    current_value = getattr(texts_module, var_name, None)
+    if current_value is None:
+        await callback.answer("⚠️ المتغيّر غير موجود", show_alert=True)
+        return
+
+    awaiting_text_value[callback.from_user.id] = var_name
+    preview = current_value if len(current_value) <= 500 else current_value[:500] + "…"
+    await callback.message.reply(
+        f"📝 القيمة الحالية لـ <code>{var_name}</code>:\n\n{preview}\n\n"
+        "أرسل النص الجديد الآن ليحل محلها، أو أرسل /cancel_edit للإلغاء."
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "dev_text:back")
+async def on_dev_text_back(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(MSG_DEV_ONLY_OPTION)
+        return
+    awaiting_text_value.pop(callback.from_user.id, None)
+    await callback.message.edit_text(MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
+    await callback.answer()
+
+
+@router.message(F.text == "/cancel_edit")
+async def on_cancel_text_edit(message: Message):
+    uid = message.from_user.id if message.from_user else 0
+    if uid in awaiting_text_value:
+        awaiting_text_value.pop(uid, None)
+        await message.reply("❌ تم إلغاء التحرير.")
+
+
+@router.message(lambda m: bool(m.from_user)
+                and m.from_user.id == config.DEVELOPER_ID
+                and m.from_user.id in awaiting_text_value)
+async def on_text_value_input(message: Message, bot: Bot):
+    uid = message.from_user.id
+    var_name = awaiting_text_value.pop(uid)
+    new_value = message.text or ""
+
+    try:
+        update_text_variable(var_name, new_value)
+    except Exception as e:
+        logger.exception("فشل تحديث ملف texts.py")
+        await message.reply(f"❌ فشل الحفظ: {e}")
+        return
+
+    await message.reply(
+        f"✅ تم حفظ <code>{var_name}</code> بنجاح.\n"
+        "⚠️ التغيير مفعّل فورًا لأي كود يستخدم <code>texts_module.VAR_NAME</code> مباشرة، "
+        "أما الأماكن اللي استوردت المتغيّر بالاسم مباشرة (from texts import ...) "
+        "فتحتاج <b>إعادة تشغيل البوت</b> حتى يظهر فيها التغيير.",
+        reply_markup=build_dev_keyboard(),
+    )
 
 
 @router.message(F.text.in_({"/start", "/help"}))
