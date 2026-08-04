@@ -79,7 +79,7 @@ MSG_DEV_MENU_IMAGE_SAVED = "✅ تم حفظ صورة القائمة."
 
 BTN_DEV_SET_MENU_IMAGE = "🖼️ تغيير صورة القائمة"
 MSG_START_HELP = (
-"احبك"
+"🔌<tg-emoji emoji-id='4918382043827537873'>🔌</tg-emoji> يتم الاتصال..."
 )
 
 MSG_TEMPLATE_FILES_MISSING = (
