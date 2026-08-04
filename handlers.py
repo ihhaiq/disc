@@ -1,5 +1,6 @@
 import asyncio
 import ast
+import html
 import logging
 import os
 import time
@@ -640,15 +641,21 @@ def update_text_variable(var_name: str, new_value: str) -> None:
 
     lines = source.splitlines(keepends=True)
     new_literal = repr(new_value)
+    new_literal_bytes = new_literal.encode("utf-8")
 
+    # ملاحظة مهمة: col_offset/end_col_offset اللي ترجعها وحدة ast تُقاس بـ
+    # بايتات UTF-8 وليس بأحرف يونيكود. بما إن نصوصنا فيها عربي وإيموجي
+    # (متعددة البايتات)، لازم نقص السطر على مستوى البايتات لا الأحرف، وإلا
+    # ينكسر السطر (يضيع جزء منه، بما فيه \n، ويندمج مع السطر التالي).
     if start_line == end_line:
-        line = lines[start_line - 1]
-        lines[start_line - 1] = line[:start_col] + new_literal + line[end_col:]
+        line_bytes = lines[start_line - 1].encode("utf-8")
+        new_line_bytes = line_bytes[:start_col] + new_literal_bytes + line_bytes[end_col:]
+        lines[start_line - 1] = new_line_bytes.decode("utf-8")
     else:
-        first_line = lines[start_line - 1]
-        last_line = lines[end_line - 1]
-        merged = first_line[:start_col] + new_literal + last_line[end_col:]
-        lines[start_line - 1:end_line] = [merged]
+        first_bytes = lines[start_line - 1].encode("utf-8")[:start_col]
+        last_bytes = lines[end_line - 1].encode("utf-8")[end_col:]
+        merged_bytes = first_bytes + new_literal_bytes + last_bytes
+        lines[start_line - 1:end_line] = [merged_bytes.decode("utf-8")]
 
     new_source = "".join(lines)
     ast.parse(new_source)  # تحقق سريع إن الملف الناتج صالح بايثونيًا قبل الحفظ
@@ -793,7 +800,7 @@ async def on_text_value_input(message: Message, bot: Bot):
         update_text_variable(var_name, new_value)
     except Exception as e:
         logger.exception("فشل تحديث ملف texts.py")
-        await message.reply(f"❌ فشل الحفظ: {e}")
+        await message.reply(f"❌ فشل الحفظ:\n<code>{html.escape(str(e))}</code>")
         return
 
     await message.reply(
