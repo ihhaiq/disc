@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
     LabeledPrice, PreCheckoutQuery, MessageEntity,
+    InputRichMessage, ReplyParameters,
 )
 
 from compose import build_disc
@@ -188,6 +189,66 @@ async def edit_text_with_premium_emoji(message: Message, text: str, **kwargs) ->
     if entities:
         return await message.edit_text(text, entities=entities, **kwargs)
     return await message.edit_text(text, **kwargs)
+
+
+# ============================================================
+# دعم الرسائل الغنية (Rich Messages) — Bot API 10.1+
+# ============================================================
+# ميزة Rich Messages منفصلة تمامًا عن sendMessage العادية (اللي تستخدم
+# parse_mode="HTML" الحالي بالمشروع). تُرسل عبر bot.send_rich_message مع
+# InputRichMessage(content=..., format="html"|"markdown"), وتدعم بنية أغنى
+# بكثير (جداول، قوائم، تفاصيل قابلة للطي، اقتباسات...). تتطلب aiogram >= 3.30.
+def escape_rich_html(text: str) -> str:
+    """
+    يهرب رموز HTML الخاصة (&, <, >) قبل إرسال نص كـ Rich Message بصيغة html.
+    استخدمها فقط لو النص "عادي" وما فيه وسوم Rich Message مقصودة بداخله؛
+    لو النص فيه وسوم Rich Message حقيقية (مثل <b> أو <details>) لا تستخدمها،
+    لأنها بتهرب الوسوم نفسها وتخلّيها تظهر كنص خام بدل ما تُفسَّر.
+    """
+    return (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+    )
+
+
+async def send_rich_message(bot: Bot, chat_id: int, html_content: str,
+                             reply_to_message_id: int | None = None,
+                             reply_markup: InlineKeyboardMarkup | None = None) -> Message:
+    """
+    يرسل رسالة عبر ميزة Rich Messages الجديدة (sendRichMessage، Bot API 10.1+).
+    html_content: نص HTML جاهز — إما وسوم Rich Message مقصودة، أو نص عادي
+    (لازم يكون مُهرَّب مسبقًا عبر escape_rich_html لو فيه رموز <, >, & غير مقصودة).
+
+    ملاحظة: لو النسخة المثبتة من aiogram أقدم من 3.30 وما تدعم sendRichMessage
+    بعد، أو صار أي خطأ أثناء الإرسال، نرجع تلقائيًا لرسالة عادية (sendMessage)
+    حتى ما ينكسر البوت.
+    """
+    reply_params = ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
+    try:
+        return await bot.send_rich_message(
+            chat_id=chat_id,
+            content=InputRichMessage(content=html_content, format="html"),
+            reply_parameters=reply_params,
+            reply_markup=reply_markup,
+        )
+    except AttributeError:
+        # نسخة aiogram قديمة ما تدعم sendRichMessage بعد
+        logger.warning("sendRichMessage غير مدعوم بهالنسخة من aiogram، الرجوع لرسالة عادية")
+    except Exception:
+        logger.exception("فشل إرسال Rich Message، الرجوع لرسالة عادية")
+
+    return await bot.send_message(chat_id=chat_id, text=html_content, reply_markup=reply_markup)
+
+
+async def reply_rich(message: Message, bot: Bot, html_content: str,
+                      reply_markup: InlineKeyboardMarkup | None = None) -> Message:
+    """اختصار: يرد على رسالة معيّنة بـ Rich Message (مع رجوع تلقائي لرسالة عادية عند الفشل)."""
+    return await send_rich_message(
+        bot, message.chat.id, html_content,
+        reply_to_message_id=message.message_id,
+        reply_markup=reply_markup,
+    )
 
 
 def render_progress_bar(percent: float, width: int = PROGRESS_BAR_WIDTH) -> str:
