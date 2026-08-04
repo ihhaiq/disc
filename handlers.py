@@ -9,7 +9,7 @@ from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
-    LabeledPrice, PreCheckoutQuery,
+    LabeledPrice, PreCheckoutQuery, MessageEntity,
 )
 
 from compose import build_disc
@@ -121,6 +121,75 @@ PROGRESS_BAR_WIDTH = 12
 STATUS_UPDATE_INTERVAL_SECONDS = 2.2
 
 
+# ============================================================
+# دعم إيموجي بريميوم (Telegram Premium Custom Emoji)
+# ============================================================
+# عشان تفعّل إيموجي بريميوم حقيقي، حط بهالقاموس: "الإيموجي العادي" -> "custom_emoji_id"
+# ملاحظة مهمة: هذا الحساب (البوت أو المستخدم اللي سحب الـ ID) لازم يملك
+# اشتراك Telegram Premium وقت الحصول على الـ custom_emoji_id (عادة عبر Bot API
+# getForumTopicIconStickers / أو سحبه من رسالة قديمة فيها نفس الإيموجي البريميوم
+# عبر MessageEntity من نوع custom_emoji). المستخدمون بدون Premium يشوفون
+# الإيموجي العادي البديل تلقائيًا من تليكرام، فما راح ينكسر الشكل عندهم.
+#
+# مثال (عدّل القيم بمعرفات حقيقية):
+# PREMIUM_EMOJI_IDS: dict[str, str] = {
+#     "⏳": "5223763545975583911",
+#     "⌛": "5223670277566716401",
+#     "✅": "5215787375673504530",
+#     "❌": "5210952531676504517",
+# }
+PREMIUM_EMOJI_IDS: dict[str, str] = {}
+
+USE_PREMIUM_EMOJI = bool(PREMIUM_EMOJI_IDS)
+
+
+def _utf16_len(ch: str) -> int:
+    """طول المحرف بوحدات UTF-16 (المطلوب لحساب offset/length بكيانات تليكرام)."""
+    return len(ch.encode("utf-16-le")) // 2
+
+
+def build_premium_entities(text: str) -> list[MessageEntity] | None:
+    """
+    يبني قائمة MessageEntity من نوع custom_emoji لأي إيموجي بالنص موجود بقاموس
+    PREMIUM_EMOJI_IDS. يرجع None لو ما فيه إيموجي بريميوم مفعّل، حتى ما نغيّر
+    سلوك الرسائل الحالية بشيء.
+    """
+    if not PREMIUM_EMOJI_IDS:
+        return None
+
+    entities: list[MessageEntity] = []
+    offset = 0
+    for ch in text:
+        length = _utf16_len(ch)
+        emoji_id = PREMIUM_EMOJI_IDS.get(ch)
+        if emoji_id:
+            entities.append(MessageEntity(
+                type="custom_emoji",
+                offset=offset,
+                length=length,
+                custom_emoji_id=emoji_id,
+            ))
+        offset += length
+
+    return entities or None
+
+
+async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
+    """نفس message.reply لكن يضيف كيانات الإيموجي البريميوم تلقائيًا إن وجدت."""
+    entities = build_premium_entities(text)
+    if entities:
+        return await message.reply(text, entities=entities, **kwargs)
+    return await message.reply(text, **kwargs)
+
+
+async def edit_text_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
+    """نفس message.edit_text لكن يضيف كيانات الإيموجي البريميوم تلقائيًا إن وجدت."""
+    entities = build_premium_entities(text)
+    if entities:
+        return await message.edit_text(text, entities=entities, **kwargs)
+    return await message.edit_text(text, **kwargs)
+
+
 def render_progress_bar(percent: float, width: int = PROGRESS_BAR_WIDTH) -> str:
     percent = max(0.0, min(100.0, percent))
     filled = int(round(width * percent / 100))
@@ -157,7 +226,11 @@ class StatusAnimator:
             text = self._render()
             if text != self._last_rendered:
                 try:
-                    await self.message.edit_text(text)
+                    entities = build_premium_entities(text)
+                    if entities:
+                        await self.message.edit_text(text, entities=entities)
+                    else:
+                        await self.message.edit_text(text)
                     self._last_rendered = text
                 except TelegramBadRequest:
                     pass
@@ -342,7 +415,7 @@ async def process_job(bot: Bot, job: dict) -> None:
     out_path = tmp(f"{uid}_{job_id}_out.mp4")
     job["temp_paths"] = [audio_path, thumb_path, disc_path, out_path]
 
-    status = await message.reply(MSG_AUDIO_RECEIVED)
+    status = await reply_with_premium_emoji(message, MSG_AUDIO_RECEIVED)
     animator = StatusAnimator(status)
     animator.start()
 
@@ -365,7 +438,7 @@ async def process_job(bot: Bot, job: dict) -> None:
 
         duration = await get_duration(audio_path)
         if duration > config.MAX_DURATION_SECONDS and not job.get("segment_start"):
-            await message.reply(MSG_DURATION_TOO_LONG_FMT.format(duration=duration))
+            await reply_with_premium_emoji(message, MSG_DURATION_TOO_LONG_FMT.format(duration=duration))
 
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
         animator.set_stage(STAGE_BUILDING_DISC)
@@ -397,7 +470,7 @@ async def process_job(bot: Bot, job: dict) -> None:
         logger.exception(LOG_PROCESS_JOB_FAILED)
         error_text = str(e) or repr(e) or e.__class__.__name__
         try:
-            await message.reply(MSG_PROCESSING_ERROR_FMT.format(error_text=error_text))
+            await reply_with_premium_emoji(message, MSG_PROCESSING_ERROR_FMT.format(error_text=error_text))
         except Exception:
             logger.exception(LOG_SEND_ERROR_FAILED)
     finally:
@@ -424,8 +497,16 @@ def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
         else:
             selected = current == (60 / float(value))
         mark = " ✅" if selected else ""
-        buttons.append(InlineKeyboardButton(text=f"{label}{mark}", callback_data=f"speed:{value}"))
-    buttons.append(InlineKeyboardButton(text=BTN_VINYL_COLOR_MENU, callback_data="vinyl_menu:open"))
+        buttons.append(InlineKeyboardButton(
+            text=f"{label}{mark}",
+            callback_data=f"speed:{value}",
+            style="primary",
+        ))
+    buttons.append(InlineKeyboardButton(
+        text=BTN_VINYL_COLOR_MENU,
+        callback_data="vinyl_menu:open",
+        style="primary",
+    ))
     return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:4], [buttons[4]]])
 
 
@@ -663,7 +744,7 @@ async def on_mode_quick(callback, bot: Bot):
         pending_audio.pop(uid, None)
         job = dict(pending)
         job["segment_start"] = 0.0
-        await callback.message.edit_text(MSG_JOB_QUEUED)
+        await edit_text_with_premium_emoji(callback.message, MSG_JOB_QUEUED)
         await _launch_job(bot, uid, job)
     else:
         pending_images[uid] = {"quick_mode": True, "audio_message_id": pending["message"].message_id}
@@ -809,7 +890,11 @@ async def _finish_wizard(bot: Bot, uid: int, send_func, segment_start: float) ->
     job["uid"] = uid
     job["segment_start"] = segment_start
 
-    await send_func(MSG_WIZ_STARTING)
+    entities = build_premium_entities(MSG_WIZ_STARTING)
+    if entities:
+        await send_func(MSG_WIZ_STARTING, entities=entities)
+    else:
+        await send_func(MSG_WIZ_STARTING)
     await _launch_job(bot, uid, job)
 
 
@@ -845,7 +930,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
             return
         photo = message.photo[-1]
         pending_entry["thumbnail_file_id"] = photo.file_id
-        await message.reply(MSG_IMAGE_RECEIVED)
+        await reply_with_premium_emoji(message, MSG_IMAGE_RECEIVED)
         await _wiz_advance_to_segment_or_finish(bot, uid, message, message.reply)
         return
 
@@ -870,7 +955,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         job["uid"] = uid
         job["segment_start"] = 0.0
 
-        await message.reply(MSG_IMAGE_RECEIVED)
+        await reply_with_premium_emoji(message, MSG_IMAGE_RECEIVED)
         await _launch_job(bot, uid, job)
         return
 
@@ -901,7 +986,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         pending_images.pop(message.from_user.id, None)
 
         await start_job_worker(bot)
-        await message.reply(MSG_IMAGE_RECEIVED)
+        await reply_with_premium_emoji(message, MSG_IMAGE_RECEIVED)
         enqueue_job(job)
         return
 
@@ -960,7 +1045,7 @@ async def on_successful_payment(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
     limits.activate_subscription(uid, config.STARS_SUBSCRIPTION_DAYS)
     logger.info(LOG_PAYMENT_RECORDED, uid)
-    await message.reply(MSG_PAYMENT_SUCCESS_FMT.format(limit=config.PREMIUM_DAILY_LIMIT))
+    await reply_with_premium_emoji(message, MSG_PAYMENT_SUCCESS_FMT.format(limit=config.PREMIUM_DAILY_LIMIT))
 
     if config.DEVELOPER_ID:
         user = message.from_user
