@@ -79,10 +79,7 @@ MSG_DEV_MENU_IMAGE_SAVED = "✅ تم حفظ صورة القائمة."
 
 BTN_DEV_SET_MENU_IMAGE = "🖼️ تغيير صورة القائمة"
 MSG_START_HELP = (
-    "<rich><p><tg-emoji emoji-id="4918382043827537873">💽</tg-emoji> أرسل لي ملف صوتي (audio) يحتوي صورة مصغرة، وراح أرجع لك فيديو قرص دوّار (vinyl) بصورتك وصوتك <tg-emoji emoji-id="5413457095766851738">💽</tg-emoji></p>
-<p></p>
-<p><tg-emoji emoji-id="5789716881099199246">⚡️</tg-emoji> اختر سرعة دوران القرص؛ </p>
-<footer><tg-emoji emoji-id="6037460610596212193">🎶</tg-emoji>هذا لا يغيّر سرعة الصوت أو الملف:</footer>"
+"احبك"
 )
 
 MSG_TEMPLATE_FILES_MISSING = (
