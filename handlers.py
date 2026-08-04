@@ -56,20 +56,6 @@ STATUS_UPDATE_INTERVAL_SECONDS = 2.2
 # ============================================================
 # دعم إيموجي بريميوم (Telegram Premium Custom Emoji)
 # ============================================================
-# عشان تفعّل إيموجي بريميوم حقيقي، حط بهالقاموس: "الإيموجي العادي" -> "custom_emoji_id"
-# ملاحظة مهمة: هذا الحساب (البوت أو المستخدم اللي سحب الـ ID) لازم يملك
-# اشتراك Telegram Premium وقت الحصول على الـ custom_emoji_id (عادة عبر Bot API
-# getForumTopicIconStickers / أو سحبه من رسالة قديمة فيها نفس الإيموجي البريميوم
-# عبر MessageEntity من نوع custom_emoji). المستخدمون بدون Premium يشوفون
-# الإيموجي العادي البديل تلقائيًا من تليكرام، فما راح ينكسر الشكل عندهم.
-#
-# مثال (عدّل القيم بمعرفات حقيقية):
-# PREMIUM_EMOJI_IDS: dict[str, str] = {
-#     "⏳": "5223763545975583911",
-#     "⌛": "5223670277566716401",
-#     "✅": "5215787375673504530",
-#     "❌": "5210952531676504517",
-# }
 PREMIUM_EMOJI_IDS: dict[str, str] = {}
 
 USE_PREMIUM_EMOJI = bool(PREMIUM_EMOJI_IDS)
@@ -81,11 +67,6 @@ def _utf16_len(ch: str) -> int:
 
 
 def build_premium_entities(text: str) -> list[MessageEntity] | None:
-    """
-    يبني قائمة MessageEntity من نوع custom_emoji لأي إيموجي بالنص موجود بقاموس
-    PREMIUM_EMOJI_IDS. يرجع None لو ما فيه إيموجي بريميوم مفعّل، حتى ما نغيّر
-    سلوك الرسائل الحالية بشيء.
-    """
     if not PREMIUM_EMOJI_IDS:
         return None
 
@@ -107,7 +88,6 @@ def build_premium_entities(text: str) -> list[MessageEntity] | None:
 
 
 async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
-    """نفس message.reply لكن يضيف كيانات الإيموجي البريميوم تلقائيًا إن وجدت."""
     entities = build_premium_entities(text)
     if entities:
         return await message.reply(text, entities=entities, **kwargs)
@@ -115,7 +95,6 @@ async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Mes
 
 
 async def edit_text_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
-    """نفس message.edit_text لكن يضيف كيانات الإيموجي البريميوم تلقائيًا إن وجدت."""
     entities = build_premium_entities(text)
     if entities:
         return await message.edit_text(text, entities=entities, **kwargs)
@@ -125,17 +104,7 @@ async def edit_text_with_premium_emoji(message: Message, text: str, **kwargs) ->
 # ============================================================
 # دعم الرسائل الغنية (Rich Messages) — Bot API 10.1+
 # ============================================================
-# ميزة Rich Messages منفصلة تمامًا عن sendMessage العادية (اللي تستخدم
-# parse_mode="HTML" الحالي بالمشروع). تُرسل عبر bot.send_rich_message مع
-# InputRichMessage(content=..., format="html"|"markdown"), وتدعم بنية أغنى
-# بكثير (جداول، قوائم، تفاصيل قابلة للطي، اقتباسات...). تتطلب aiogram >= 3.30.
 def escape_rich_html(text: str) -> str:
-    """
-    يهرب رموز HTML الخاصة (&, <, >) قبل إرسال نص كـ Rich Message بصيغة html.
-    استخدمها فقط لو النص "عادي" وما فيه وسوم Rich Message مقصودة بداخله؛
-    لو النص فيه وسوم Rich Message حقيقية (مثل <b> أو <details>) لا تستخدمها،
-    لأنها بتهرب الوسوم نفسها وتخلّيها تظهر كنص خام بدل ما تُفسَّر.
-    """
     return (
         text.replace("&", "&amp;")
             .replace("<", "&lt;")
@@ -146,15 +115,6 @@ def escape_rich_html(text: str) -> str:
 async def send_rich_message(bot: Bot, chat_id: int, html_content: str,
                              reply_to_message_id: int | None = None,
                              reply_markup: InlineKeyboardMarkup | None = None) -> Message:
-    """
-    يرسل رسالة عبر ميزة Rich Messages الجديدة (sendRichMessage، Bot API 10.1+).
-    html_content: نص HTML جاهز — إما وسوم Rich Message مقصودة، أو نص عادي
-    (لازم يكون مُهرَّب مسبقًا عبر escape_rich_html لو فيه رموز <, >, & غير مقصودة).
-
-    ملاحظة: لو النسخة المثبتة من aiogram أقدم من 3.30 وما تدعم sendRichMessage
-    بعد، أو صار أي خطأ أثناء الإرسال، نرجع تلقائيًا لرسالة عادية (sendMessage)
-    حتى ما ينكسر البوت.
-    """
     reply_params = ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
     try:
         return await bot.send_rich_message(
@@ -164,7 +124,6 @@ async def send_rich_message(bot: Bot, chat_id: int, html_content: str,
             reply_markup=reply_markup,
         )
     except AttributeError:
-        # نسخة aiogram قديمة ما تدعم sendRichMessage بعد
         logger.warning("sendRichMessage غير مدعوم بهالنسخة من aiogram، الرجوع لرسالة عادية")
     except Exception:
         logger.exception("فشل إرسال Rich Message، الرجوع لرسالة عادية")
@@ -174,7 +133,6 @@ async def send_rich_message(bot: Bot, chat_id: int, html_content: str,
 
 async def reply_rich(message: Message, bot: Bot, html_content: str,
                       reply_markup: InlineKeyboardMarkup | None = None) -> Message:
-    """اختصار: يرد على رسالة معيّنة بـ Rich Message (مع رجوع تلقائي لرسالة عادية عند الفشل)."""
     return await send_rich_message(
         bot, message.chat.id, html_content,
         reply_to_message_id=message.message_id,
@@ -568,7 +526,6 @@ def _whitelist_text() -> str:
 # محرر النصوص (لوحة المطور) — يعرض متغيرات texts.py بصفحات (5 بكل صفحة)
 # ============================================================
 def get_editable_text_names() -> list[str]:
-    """يرجع أسماء كل المتغيرات النصية القابلة للتحرير بملف texts.py، مرتبة أبجديًا."""
     names = []
     for name in dir(texts_module):
         if name.startswith("_"):
@@ -609,17 +566,6 @@ def _text_list_header(page: int) -> str:
 
 
 def update_text_variable(var_name: str, new_value: str) -> None:
-    """
-    يحدّث قيمة متغيّر نصي داخل ملف texts.py على القرص، بدون المساس بباقي الملف
-    (يحافظ على الشكل الأصلي حتى لو القيمة موزّعة على أسطر متعددة). يحدّث كمان
-    القيمة بالذاكرة الحالية (texts_module.VAR_NAME) حتى تنعكس فورًا على أي كود
-    يقرأ القيمة عبر texts_module.VAR_NAME مباشرة.
-
-    ملاحظة مهمة: الأماكن اللي سوّت `from texts import VAR_NAME` وقت إقلاع
-    البوت (وهذا حال أغلب handlers.py) تحتفظ بالقيمة القديمة بالذاكرة لحد ما
-    يعاد تشغيل البوت، رغم إن الملف على القرص والمتغيّر بموديول texts نفسه
-    يكونان محدّثين فورًا.
-    """
     with open(TEXTS_FILE_PATH, "r", encoding="utf-8") as f:
         source = f.read()
 
@@ -643,10 +589,6 @@ def update_text_variable(var_name: str, new_value: str) -> None:
     new_literal = repr(new_value)
     new_literal_bytes = new_literal.encode("utf-8")
 
-    # ملاحظة مهمة: col_offset/end_col_offset اللي ترجعها وحدة ast تُقاس بـ
-    # بايتات UTF-8 وليس بأحرف يونيكود. بما إن نصوصنا فيها عربي وإيموجي
-    # (متعددة البايتات)، لازم نقص السطر على مستوى البايتات لا الأحرف، وإلا
-    # ينكسر السطر (يضيع جزء منه، بما فيه \n، ويندمج مع السطر التالي).
     if start_line == end_line:
         line_bytes = lines[start_line - 1].encode("utf-8")
         new_line_bytes = line_bytes[:start_col] + new_literal_bytes + line_bytes[end_col:]
@@ -664,6 +606,35 @@ def update_text_variable(var_name: str, new_value: str) -> None:
         f.write(new_source)
 
     setattr(texts_module, var_name, new_value)
+
+
+async def validate_html_text(bot: Bot, chat_id: int, text: str) -> str | None:
+    """
+    يتحقق إن النص صالح كـ HTML بمعايير تليكرام (وسوم مدعومة + tg-emoji بمعرفات
+    صحيحة) عن طريق محاولة إرسال رسالة تجريبية صامتة ثم حذفها فورًا.
+    يرجّع None لو تمام، أو نص الخطأ لو فيه مشكلة.
+    """
+    try:
+        test_msg = await bot.send_message(chat_id, text, disable_notification=True)
+        await test_msg.delete()
+        return None
+    except TelegramBadRequest as e:
+        return str(e)
+
+
+async def safe_reply(message: Message, text: str, **kwargs) -> Message:
+    """
+    نفس message.reply لكن لا تكسر البوت لو صار can't parse entities:
+    ترجع تلقائيًا لإرسال النص كنص خام (escaped) بدل رمي استثناء لأعلى.
+    """
+    try:
+        return await message.reply(text, **kwargs)
+    except TelegramBadRequest as e:
+        if "can't parse entities" in str(e).lower():
+            logger.warning("فشل تفسير HTML بنص محفوظ مسبقًا، سيُرسل كنص خام: %s", e)
+            clean_kwargs = {k: v for k, v in kwargs.items() if k != "parse_mode"}
+            return await message.reply(html.escape(text), parse_mode=None, **clean_kwargs)
+        raise
 
 
 @router.callback_query(F.data == "dev_whitelist:open")
@@ -766,9 +737,10 @@ async def on_dev_text_edit(callback, bot: Bot):
     escaped_preview = html.escape(preview)
     await callback.message.reply(
         f"📝 القيمة الحالية لـ <code>{var_name}</code>:\n\n<code>{escaped_preview}</code>\n\n"
-        "أرسل النص الجديد الآن ليحل محلها. تقدر تحط إيموجي بريميوم بصيغة:\n"
+        "أرسل النص الجديد الآن ليحل محلها. لإيموجي بريميوم استخدم صيغة:\n"
         "<code>&lt;tg-emoji emoji-id='123'&gt;😀&lt;/tg-emoji&gt;</code>\n"
-        "وسأتحقق منه قبل الحفظ. أو أرسل /cancel_edit للإلغاء."
+        "(بايدي رقمي صحيح ومحتوى fallback بالداخل) وسأتحقق منه قبل الحفظ.\n"
+        "أو أرسل /cancel_edit للإلغاء."
     )
     await callback.answer()
 
@@ -817,7 +789,7 @@ async def on_text_value_input(message: Message, bot: Bot):
         return
 
     await message.reply(
-        f"✅ تم حفظ <code>{var_name}</code> بنجاح، وتم التحقق منه فعليًا بأنه HTML صالح.\n"
+        f"✅ تم حفظ <code>{var_name}</code> بنجاح، وتم التحقق منه بأنه HTML صالح فعليًا.\n"
         "⚠️ التغيير مفعّل فورًا لأي كود يستخدم <code>texts_module.VAR_NAME</code> مباشرة، "
         "أما الأماكن اللي استوردت المتغيّر بالاسم مباشرة (from texts import ...) "
         "فتحتاج <b>إعادة تشغيل البوت</b> حتى يظهر فيها التغيير.",
