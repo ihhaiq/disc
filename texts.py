@@ -3,6 +3,112 @@
 كل النصوص المستخدمة في المشروع (رسائل تليكرام، نصوص الأزرار، ورسائل السجل)
 مجمّعة هنا كمتغيرات حتى يسهل تعديلها بدون البحث داخل كل ملف.
 """
+import re
+from html.parser import HTMLParser
+
+
+# ============================================================
+# دوال تحويل النصوص والـ HTML
+# ============================================================
+
+class HTMLToTelegramParser(HTMLParser):
+    """محوّل HTML إلى صيغة Telegram المدعومة (<b>, <i>, <code>, إلخ)"""
+    
+    def __init__(self):
+        super().__init__()
+        self.text = ""
+        self.open_tags = []
+    
+    def handle_starttag(self, tag, attrs):
+        # فقط الـ tags المدعومة
+        if tag in ('b', 'strong', 'i', 'em', 'code', 'pre', 'u', 's', 'a'):
+            self.open_tags.append(tag)
+            if tag in ('b', 'strong'):
+                self.text += '<b>'
+            elif tag in ('i', 'em'):
+                self.text += '<i>'
+            elif tag == 'code':
+                self.text += '<code>'
+            elif tag == 'pre':
+                self.text += '<pre>'
+            elif tag == 'u':
+                self.text += '<u>'
+            elif tag == 's':
+                self.text += '<s>'
+            elif tag == 'a':
+                href = dict(attrs).get('href', '#')
+                self.text += f'<a href="{href}">'
+    
+    def handle_endtag(self, tag):
+        if tag in ('b', 'strong', 'i', 'em', 'code', 'pre', 'u', 's', 'a'):
+            if self.open_tags and self.open_tags[-1] in (tag, 'strong' if tag == 'b' else tag, 'em' if tag == 'i' else tag):
+                self.open_tags.pop()
+            if tag in ('b', 'strong'):
+                self.text += '</b>'
+            elif tag in ('i', 'em'):
+                self.text += '</i>'
+            elif tag == 'code':
+                self.text += '</code>'
+            elif tag == 'pre':
+                self.text += '</pre>'
+            elif tag == 'u':
+                self.text += '</u>'
+            elif tag == 's':
+                self.text += '</s>'
+            elif tag == 'a':
+                self.text += '</a>'
+    
+    def handle_data(self, data):
+        self.text += data
+
+
+def clean_html(html_text: str) -> str:
+    """تحويل HTML الخام إلى Telegram HTML صحيح (شيل tags غير مدعومة)"""
+    # شيل أي tags غير مدعومة
+    html_text = re.sub(r'</?h[1-6][^>]*>', '', html_text)  # شيل h1-h6
+    html_text = re.sub(r'</?p[^>]*>', '', html_text)  # شيل p
+    html_text = re.sub(r'</?div[^>]*>', '', html_text)  # شيل div
+    html_text = re.sub(r'</?footer[^>]*>', '', html_text)  # شيل footer
+    html_text = re.sub(r'</?span[^>]*>', '', html_text)  # شيل span
+    html_text = re.sub(r'</?section[^>]*>', '', html_text)  # شيل section
+    html_text = re.sub(r'</?article[^>]*>', '', html_text)  # شيل article
+    html_text = re.sub(r'</?main[^>]*>', '', html_text)  # شيل main
+    
+    # حوّل الفواصل الفارغة إلى newlines
+    html_text = re.sub(r'\n\s*\n+', '\n\n', html_text)  # دمج newlines متكررة
+    
+    parser = HTMLToTelegramParser()
+    try:
+        parser.feed(html_text)
+        return parser.text.strip()
+    except:
+        # لو فشل التحليل، أرجع النص مع شيل tags فقط
+        return re.sub(r'<[^>]+>', '', html_text).strip()
+
+
+def text_to_bold(text: str) -> str:
+    """حوّل نص عادي إلى عريض"""
+    return f"<b>{text}</b>"
+
+
+def text_to_italic(text: str) -> str:
+    """حوّل نص عادي إلى مائل"""
+    return f"<i>{text}</i>"
+
+
+def text_to_code(text: str) -> str:
+    """حوّل نص عادي إلى كود"""
+    return f"<code>{text}</code>"
+
+
+def text_to_underline(text: str) -> str:
+    """حوّل نص عادي إلى مسطر"""
+    return f"<u>{text}</u>"
+
+
+def text_to_strikethrough(text: str) -> str:
+    """حوّل نص عادي إلى مشطوب"""
+    return f"<s>{text}</s>"
 
 # ============================================================
 # config.py
@@ -62,7 +168,7 @@ MSG_DURATION_TOO_LONG_FMT = (
     "سأرسل لك فيديو لمدة دقيقة واحدة."
 )
 
-MSG_PROCESSING_ERROR_FMT = "❌ صار خطأ أثناء المعالجة:\n<code>{error_text}</code>"
+MSG_PROCESSING_ERROR_FMT = "❌ صار خطأ أثناء المعالجة:\n<code>{error_text}</code>"  # صحيح ✅
 
 MSG_DEV_CHOOSE_TEMPLATE = "🎨 اختر قالب القرص للمطور فقط:"
 
@@ -79,7 +185,11 @@ MSG_DEV_MENU_IMAGE_SAVED = "✅ تم حفظ صورة القائمة."
 
 BTN_DEV_SET_MENU_IMAGE = "🖼️ تغيير صورة القائمة"
 MSG_START_HELP = (
-"🔌<tg-emoji emoji-id='4918382043827537873'>🔌</tg-emoji> يتم الاتصال..."
+    "<b>I'm making a vinyl Disc 💽🎶</b>\n\n"
+    "💽 أرسل لي ملف صوتي (audio) يحتوي صورة مصغرة، "
+    "وراح أرجع لك فيديو قرص دوّار (vinyl) بصورتك وصوتك 💽⚡️\n\n"
+    "<b>🎶 اختر سرعة دوران القرص:</b>\n"
+    "<i>هذا لا يغيّر سرعة الصوت أو الملف</i>"
 )
 
 MSG_TEMPLATE_FILES_MISSING = (
