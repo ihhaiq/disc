@@ -53,7 +53,7 @@ VINYL_RED_PATH = os.path.join(ASSETS_DIR, "vinyl_red.png")
 VINYL_GREEN_PATH = os.path.join(ASSETS_DIR, "vinyl_green.png")
 SHADOW_GREEN_PATH = os.path.join(ASSETS_DIR, "shadow_green.png")
 SHADOW_RED_PATH = os.path.join(ASSETS_DIR, "shadow_red.png")
-VINYL_BLOODY_PATH = oc.path.join(ASSETS_DIR, "vinyl_bloody.png")
+VINYL_BLOODY_PATH = os.path.join(ASSETS_DIR, "vinyl_bloody.png")
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
 
 # --- مجلد التخزين الدائم (لازم يكون مربوط بـ Railway Volume) ---
