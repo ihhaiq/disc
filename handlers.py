@@ -20,6 +20,7 @@ from processor import get_duration, render_vinyl
 import config
 import limits
 import texts as texts_module
+from texts import clean_html, text_to_bold, text_to_italic, text_to_code, text_to_underline, text_to_strikethrough
 import math
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,34 @@ def _utf16_len(ch: str) -> int:
     return len(ch.encode("utf-16-le")) // 2
 
 
+# ============================================================
+# دوال مساعدة لتنسيق النصوص — للمطور
+# ============================================================
+def fmt_bold(text: str) -> str:
+    """تحويل نص إلى عريض: **النص** ← <b>النص</b>"""
+    return text_to_bold(text)
+
+
+def fmt_italic(text: str) -> str:
+    """تحويل نص إلى مائل: *النص* ← <i>النص</i>"""
+    return text_to_italic(text)
+
+
+def fmt_code(text: str) -> str:
+    """تحويل نص إلى كود: `النص` ← <code>النص</code>"""
+    return text_to_code(text)
+
+
+def fmt_underline(text: str) -> str:
+    """تحويل نص إلى مسطر: __النص__ ← <u>النص</u>"""
+    return text_to_underline(text)
+
+
+def fmt_strikethrough(text: str) -> str:
+    """تحويل نص إلى مشطوب: ~~النص~~ ← <s>النص</s>"""
+    return text_to_strikethrough(text)
+
+
 def build_premium_entities(text: str) -> list[MessageEntity] | None:
     if not PREMIUM_EMOJI_IDS:
         return None
@@ -88,10 +117,19 @@ def build_premium_entities(text: str) -> list[MessageEntity] | None:
 
 
 async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
+    # حوّل النص تلقائياً أولاً
+    text = sanitize_and_convert_text(text)
     entities = build_premium_entities(text)
-    if entities:
-        return await message.reply(text, entities=entities, **kwargs)
-    return await message.reply(text, **kwargs)
+    try:
+        if entities:
+            return await message.reply(text, entities=entities, **kwargs)
+        return await message.reply(text, **kwargs)
+    except TelegramBadRequest as e:
+        if "can't parse entities" in str(e).lower():
+            logger.warning("فشل تفسير HTML، سيُرسل كنص خام: %s", e)
+            clean_kwargs = {k: v for k, v in kwargs.items() if k != "entities"}
+            return await message.reply(html.escape(text), **clean_kwargs)
+        raise
 
 
 async def edit_text_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
@@ -455,7 +493,7 @@ def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
     buttons.append(InlineKeyboardButton(
         text=texts_module.BTN_VINYL_COLOR_MENU,
         callback_data="vinyl_menu:open",
-        style="danger",
+        style="primary",
     ))
     return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:4], [buttons[4]]])
 
@@ -565,7 +603,37 @@ def _text_list_header(page: int) -> str:
     return f"✏️ تحرير النصوص — صفحة {page + 1}/{total_pages} ({total} متغيّر):"
 
 
+def process_text_markup(text: str) -> str:
+    """
+    معالجة النصوص المدخلة من المطور: تحويل صيغ خاصة لـ HTML Telegram
+    
+    الصيغ المدعومة:
+    - **نص** أو __نص__ → <b>نص</b> (عريض)
+    - *نص* أو _نص_ → <i>نص</i> (مائل)
+    - `نص` → <code>نص</code> (كود)
+    - ~~نص~~ → <s>نص</s> (مشطوب)
+    - <<نص>> → <u>نص</u> (مسطر)
+    - HTML الخام (مثل <h1>, <p>) يتم تنظيفه
+    """
+    # تحويل الصيغ الخاصة
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)  # **نص** → <b>
+    text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)      # __نص__ → <b>
+    text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)      # *نص* → <i> (بحذر من **)
+    text = re.sub(r'_(.+?)_', r'<i>\1</i>', text)        # _نص_ → <i>
+    text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)  # `نص` → <code>
+    text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)      # ~~نص~~ → <s>
+    text = re.sub(r'<<(.+?)>>', r'<u>\1</u>', text)      # <<نص>> → <u>
+    
+    # تنظيف HTML غير المدعوم
+    text = texts_module.clean_html(text)
+    
+    return text
+
+
 def update_text_variable(var_name: str, new_value: str) -> None:
+    # معالجة النص (تحويل الصيغ الخاصة + تنظيف HTML)
+    processed_value = process_text_markup(new_value)
+    
     with open(TEXTS_FILE_PATH, "r", encoding="utf-8") as f:
         source = f.read()
 
@@ -586,7 +654,7 @@ def update_text_variable(var_name: str, new_value: str) -> None:
     end_line, end_col = value_node.end_lineno, value_node.end_col_offset
 
     lines = source.splitlines(keepends=True)
-    new_literal = repr(new_value)
+    new_literal = repr(processed_value)
     new_literal_bytes = new_literal.encode("utf-8")
 
     if start_line == end_line:
@@ -605,7 +673,7 @@ def update_text_variable(var_name: str, new_value: str) -> None:
     with open(TEXTS_FILE_PATH, "w", encoding="utf-8") as f:
         f.write(new_source)
 
-    setattr(texts_module, var_name, new_value)
+    setattr(texts_module, var_name, processed_value)
 
 
 async def validate_html_text(bot: Bot, chat_id: int, text: str) -> str | None:
@@ -622,11 +690,33 @@ async def validate_html_text(bot: Bot, chat_id: int, text: str) -> str | None:
         return str(e)
 
 
+def sanitize_and_convert_text(text: str) -> str:
+    """
+    يأخذ أي نص (HTML خام أو نص عادي) ويحوّله إلى Telegram HTML صحيح.
+    - إذا كان فيه tags HTML غير مدعومة ← يشيلها ويحتفظ بالمحتوى
+    - إذا كان نص عادي بدون tags ← يرجعه كما هو
+    - إذا كان فيه تعارضات HTML ← يصلحها تلقائياً
+    """
+    if not text:
+        return ""
+    
+    # لو النص فيه tags HTML، حوّله إلى صيغة Telegram الصحيحة
+    if '<' in text and '>' in text:
+        return clean_html(text)
+    
+    # لو النص عادي بدون tags، أرجعه كما هو
+    return text
+
+
 async def safe_reply(message: Message, text: str, **kwargs) -> Message:
     """
-    نفس message.reply لكن لا تكسر البوت لو صار can't parse entities:
-    ترجع تلقائيًا لإرسال النص كنص خام (escaped) بدل رمي استثناء لأعلى.
+    نفس message.reply لكن ذكي:
+    - يحول HTML/نص خام تلقائياً إلى صيغة Telegram الصحيحة
+    - لو صار خطأ "can't parse entities" ← يعاد المحاولة بنص خام
     """
+    # حوّل النص تلقائياً أولاً
+    text = sanitize_and_convert_text(text)
+    
     try:
         return await message.reply(text, **kwargs)
     except TelegramBadRequest as e:
