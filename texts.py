@@ -177,7 +177,8 @@ MSG_VINYL_COLOR_INFO = (
     "⚫ الأسود\n"
     "💗 وردي \n"
     "🔵 أزرق \n"
-    "🟡 أصفر"
+    "🟡 أصفر \n"
+    "🟥 bloody red"
 )
 
 MSG_DEV_SEND_MENU_IMAGE = "🖼️ أرسل الصورة اللي تريدها تظهر بقائمة اختيار اللون:"
@@ -260,6 +261,7 @@ BTN_VINYL_COLOR_MENU = "🎨 لون القرص"
 BTN_VINYL_RED = "❤️" 
 BTN_VINYL_BLACK = "🖤 "
 BTN_VINYL_GREEN = "اخضر تجريبي"
+BTN_VINYL_BLOODY = "🩸"
 BTN_BACK = "🔙 رجوع"
 
 SPEED_LABEL_FULL = "دورة كاملة"
