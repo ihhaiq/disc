@@ -24,7 +24,7 @@ import texts as texts_module
 from texts import clean_html, text_to_bold, text_to_italic, text_to_code, text_to_underline, text_to_strikethrough
 import custom_texts
 import math
-
+from texts import BTN_VINYL_BLOODY
 logger = logging.getLogger(__name__)
 router = Router()
 
