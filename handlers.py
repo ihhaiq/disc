@@ -455,7 +455,7 @@ def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
     buttons.append(InlineKeyboardButton(
         text=texts_module.BTN_VINYL_COLOR_MENU,
         callback_data="vinyl_menu:open",
-        style="primary",
+        style="danger",
     ))
     return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:4], [buttons[4]]])
 
