@@ -8,7 +8,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 
 import config
-from handlers import router
+from handlers import router, load_custom_texts_into_memory
 from texts import LOG_BOT_RUNNING, LOG_USING_LOCAL_BOT_API
 
 
@@ -18,6 +18,9 @@ async def main():
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
     os.makedirs(config.TEMP_DIR, exist_ok=True)
+    
+    # تحميل النصوص المخصصة من JSON الدائم
+    load_custom_texts_into_memory()
 
     session = None
     if config.USE_LOCAL_BOT_API:
