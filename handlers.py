@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import uuid
+import re
 # ميو 
 from aiogram import Router, F, Bot
 from aiogram.enums import ChatAction
@@ -21,10 +22,34 @@ import config
 import limits
 import texts as texts_module
 from texts import clean_html, text_to_bold, text_to_italic, text_to_code, text_to_underline, text_to_strikethrough
+import custom_texts
 import math
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+
+# ============================================================
+# تحميل النصوص المخصصة عند البدء
+# ============================================================
+def load_custom_texts_into_memory() -> None:
+    """
+    تحميل جميع النصوص المخصصة من custom_texts.json إلى الذاكرة.
+    يتم استدعاء هذه الدالة مرة واحدة عند بدء البوت.
+    """
+    custom_list = custom_texts.list_custom()
+    if custom_list:
+        logger.info(f"📝 تم تحميل {len(custom_list)} نص مخصص من JSON الدائم")
+        for var_name, entry in custom_list.items():
+            value = entry.get("value", "")
+            setattr(texts_module, var_name, value)
+            editor_name = entry.get("editor_name", "Unknown")
+            updated_at = entry.get("updated_at", 0)
+            import datetime
+            time_str = datetime.datetime.fromtimestamp(updated_at).strftime("%Y-%m-%d %H:%M:%S") if updated_at else "?"
+            logger.info(f"  • {var_name} (محرّر: {editor_name}, آخر تعديل: {time_str})")
+    else:
+        logger.info("ℹ️ لا توجد نصوص مخصصة محفوظة حالياً")
 
 job_queue: asyncio.Queue[dict] = asyncio.Queue()
 developer_job_queue: asyncio.Queue[dict] = asyncio.Queue()
@@ -630,49 +655,24 @@ def process_text_markup(text: str) -> str:
     return text
 
 
-def update_text_variable(var_name: str, new_value: str) -> None:
+def update_text_variable(var_name: str, new_value: str, editor_id: int = 0, editor_name: str = "") -> None:
+    """
+    احفظ التعديل بـ JSON دائم (custom_texts.json) بدل تعديل texts.py مباشرة.
+    - يحفظ فوراً بـ DATA_DIR (مربوط بـ Railway Volume)
+    - يبقى بعد Restart/Redeploy
+    - يحتفظ بمعلومات المحرّر والوقت
+    """
     # معالجة النص (تحويل الصيغ الخاصة + تنظيف HTML)
     processed_value = process_text_markup(new_value)
     
-    with open(TEXTS_FILE_PATH, "r", encoding="utf-8") as f:
-        source = f.read()
-
-    tree = ast.parse(source)
-    target_node = None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and len(node.targets) == 1:
-            target = node.targets[0]
-            if isinstance(target, ast.Name) and target.id == var_name:
-                target_node = node
-                break
-
-    if target_node is None:
+    # تحقق إن المتغيّر موجود بـ texts.py
+    if not hasattr(texts_module, var_name):
         raise ValueError(f"المتغيّر {var_name} غير موجود بملف texts.py")
-
-    value_node = target_node.value
-    start_line, start_col = value_node.lineno, value_node.col_offset
-    end_line, end_col = value_node.end_lineno, value_node.end_col_offset
-
-    lines = source.splitlines(keepends=True)
-    new_literal = repr(processed_value)
-    new_literal_bytes = new_literal.encode("utf-8")
-
-    if start_line == end_line:
-        line_bytes = lines[start_line - 1].encode("utf-8")
-        new_line_bytes = line_bytes[:start_col] + new_literal_bytes + line_bytes[end_col:]
-        lines[start_line - 1] = new_line_bytes.decode("utf-8")
-    else:
-        first_bytes = lines[start_line - 1].encode("utf-8")[:start_col]
-        last_bytes = lines[end_line - 1].encode("utf-8")[end_col:]
-        merged_bytes = first_bytes + new_literal_bytes + last_bytes
-        lines[start_line - 1:end_line] = [merged_bytes.decode("utf-8")]
-
-    new_source = "".join(lines)
-    ast.parse(new_source)  # تحقق سريع إن الملف الناتج صالح بايثونيًا قبل الحفظ
-
-    with open(TEXTS_FILE_PATH, "w", encoding="utf-8") as f:
-        f.write(new_source)
-
+    
+    # احفظ بـ custom_texts.json (دائم ويبقى بعد Restart)
+    custom_texts.set_custom(var_name, processed_value, editor_id=editor_id, editor_name=editor_name)
+    
+    # حدّث الذاكرة الحالية أيضاً (حتى لا تحتاج restart)
     setattr(texts_module, var_name, processed_value)
 
 
@@ -872,17 +872,19 @@ async def on_text_value_input(message: Message, bot: Bot):
         return
 
     try:
-        update_text_variable(var_name, new_value)
+        # احفظ مع معلومات المحرّر (الآيدي والاسم)
+        user = message.from_user
+        editor_name = user.first_name or user.username or f"User{uid}" if user else "Unknown"
+        update_text_variable(var_name, new_value, editor_id=uid, editor_name=editor_name)
     except Exception as e:
-        logger.exception("فشل تحديث ملف texts.py")
+        logger.exception("فشل حفظ النص المخصص")
         await message.reply(f"❌ فشل الحفظ:\n<code>{html.escape(str(e))}</code>")
         return
 
     await message.reply(
-        f"✅ تم حفظ <code>{var_name}</code> بنجاح، وتم التحقق منه بأنه HTML صالح فعليًا.\n"
-        "⚠️ التغيير مفعّل فورًا لأي كود يستخدم <code>texts_module.VAR_NAME</code> مباشرة، "
-        "أما الأماكن اللي استوردت المتغيّر بالاسم مباشرة (from texts import ...) "
-        "فتحتاج <b>إعادة تشغيل البوت</b> حتى يظهر فيها التغيير.",
+        f"✅ تم حفظ <code>{var_name}</code> بنجاح بشكل <b>دائم</b>! 🎉\n"
+        "✨ التغيير مفعّل فوراً وسيبقى حتى بعد إعادة تشغيل البوت (يُحفظ بـ Railway Volume).\n"
+        f"👤 محرّر: {editor_name} (ID: {uid})",
         reply_markup=build_dev_keyboard(),
     )
 
