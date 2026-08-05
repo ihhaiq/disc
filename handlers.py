@@ -93,6 +93,79 @@ def _utf16_len(ch: str) -> int:
 
 
 # ============================================================
+# نظام الإيموجي البريميوم الذكي — استخراج وإدارة تلقائية
+# ============================================================
+PREMIUM_EMOJI_REGEX = r'<tg-emoji\s+emoji-id=["\'](\d+)["\']\s*>(.+?)</tg-emoji>'
+
+
+def extract_premium_emojis(text: str) -> dict[str, str]:
+    """استخرج كل الإيموجي البريميوم من النص تلقائياً."""
+    emojis = {}
+    matches = re.finditer(PREMIUM_EMOJI_REGEX, text)
+    for match in matches:
+        emoji_id = match.group(1)
+        emoji_char = match.group(2)
+        emojis[emoji_char] = emoji_id
+        logger.debug(f"✅ استخرج إيموجي بريميوم: {emoji_char} (ID: {emoji_id})")
+    return emojis
+
+
+def clean_premium_emoji_tags(text: str) -> str:
+    """شيل tags الإيموجي البريميوم من النص (احتفظ بالإيموجي نفسه)."""
+    return re.sub(PREMIUM_EMOJI_REGEX, r'\2', text)
+
+
+def build_premium_entities_from_text(text: str) -> list[MessageEntity] | None:
+    """ابني entities للإيموجي البريميوم من النص."""
+    emojis_dict = extract_premium_emojis(text)
+    
+    if not emojis_dict:
+        return None
+    
+    clean_text = clean_premium_emoji_tags(text)
+    
+    entities: list[MessageEntity] = []
+    offset = 0
+    
+    for ch in clean_text:
+        length = _utf16_len(ch)
+        
+        if ch in emojis_dict:
+            emoji_id = emojis_dict[ch]
+            entities.append(MessageEntity(
+                type="custom_emoji",
+                offset=offset,
+                length=length,
+                custom_emoji_id=emoji_id,
+            ))
+            logger.debug(f"✅ أضفت entity: {ch} (offset={offset}, length={length}, id={emoji_id})")
+        
+        offset += length
+    
+    return entities if entities else None
+
+
+def validate_premium_emoji_syntax(text: str) -> tuple[bool, str]:
+    """تحقق من صحة صيغة الإيموجي البريميوم."""
+    open_tags = len(re.findall(r'<tg-emoji', text))
+    close_tags = len(re.findall(r'</tg-emoji>', text))
+    
+    if open_tags != close_tags:
+        return False, f"❌ عدد tags غير متطابق: {open_tags} فتح و {close_tags} إغلاق"
+    
+    invalid_ids = re.findall(r'<tg-emoji\s+emoji-id=["\']([^"\']+)["\']', text)
+    for emoji_id in invalid_ids:
+        if not emoji_id.isdigit():
+            return False, f"❌ emoji-id يجب أن يكون أرقام فقط: '{emoji_id}'"
+    
+    empty_tags = re.findall(r'<tg-emoji[^>]*>\s*</tg-emoji>', text)
+    if empty_tags:
+        return False, "❌ tag الإيموجي فارغ، ضع إيموجي أو نص بالداخل"
+    
+    return True, ""
+
+
+# ============================================================
 # دوال مساعدة لتنسيق النصوص — للمطور
 # ============================================================
 def fmt_bold(text: str) -> str:
@@ -120,34 +193,38 @@ def fmt_strikethrough(text: str) -> str:
     return text_to_strikethrough(text)
 
 
-def build_premium_entities(text: str) -> list[MessageEntity] | None:
-    if not PREMIUM_EMOJI_IDS:
-        return None
-
-    entities: list[MessageEntity] = []
-    offset = 0
-    for ch in text:
-        length = _utf16_len(ch)
-        emoji_id = PREMIUM_EMOJI_IDS.get(ch)
-        if emoji_id:
-            entities.append(MessageEntity(
-                type="custom_emoji",
-                offset=offset,
-                length=length,
-                custom_emoji_id=emoji_id,
-            ))
-        offset += length
-
-    return entities or None
-
-
 async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
-    # حوّل النص تلقائياً أولاً
+    """
+    أرسل رسالة مع دعم كامل للإيموجي البريميوم والـ HTML.
+    
+    يتولى تلقائياً:
+    - استخراج أكواد الإيموجي البريميوم
+    - تحويل HTML غير المدعوم
+    - بناء entities صحيحة
+    """
+    # حوّل النص تلقائياً (تنظيف HTML)
     text = sanitize_and_convert_text(text)
-    entities = build_premium_entities(text)
+    
+    # استخرج الإيموجي البريميوم
+    emojis_dict = extract_premium_emojis(text)
+    
+    if emojis_dict:
+        # نظّف tags الإيموجي من النص
+        clean_text = clean_premium_emoji_tags(text)
+        
+        # ابني entities للإيموجي
+        entities = build_premium_entities_from_text(text)
+        
+        try:
+            if entities:
+                return await message.reply(clean_text, entities=entities, **kwargs)
+            return await message.reply(clean_text, **kwargs)
+        except TelegramBadRequest as e:
+            logger.warning(f"فشل إرسال رسالة مع إيموجي بريميوم: {e}, سيتم الإرسال بدونها")
+            return await message.reply(clean_text, **kwargs)
+    
+    # إذا ما فيه إيموجي بريميوم، أرسل عادي
     try:
-        if entities:
-            return await message.reply(text, entities=entities, **kwargs)
         return await message.reply(text, **kwargs)
     except TelegramBadRequest as e:
         if "can't parse entities" in str(e).lower():
@@ -158,10 +235,38 @@ async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Mes
 
 
 async def edit_text_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
-    entities = build_premium_entities(text)
-    if entities:
-        return await message.edit_text(text, entities=entities, **kwargs)
-    return await message.edit_text(text, **kwargs)
+    """
+    عدّل نص رسالة مع دعم الإيموجي البريميوم.
+    """
+    # حوّل النص تلقائياً
+    text = sanitize_and_convert_text(text)
+    
+    # استخرج الإيموجي البريميوم
+    emojis_dict = extract_premium_emojis(text)
+    
+    if emojis_dict:
+        # نظّف tags الإيموجي
+        clean_text = clean_premium_emoji_tags(text)
+        
+        # ابني entities
+        entities = build_premium_entities_from_text(text)
+        
+        try:
+            if entities:
+                return await message.edit_text(clean_text, entities=entities, **kwargs)
+            return await message.edit_text(clean_text, **kwargs)
+        except TelegramBadRequest as e:
+            logger.warning(f"فشل تعديل الرسالة مع إيموجي بريميوم: {e}")
+            return await message.edit_text(clean_text, **kwargs)
+    
+    try:
+        return await message.edit_text(text, **kwargs)
+    except TelegramBadRequest as e:
+        if "can't parse entities" in str(e).lower():
+            logger.warning("فشل تفسير HTML في التعديل")
+            clean_kwargs = {k: v for k, v in kwargs.items() if k != "entities"}
+            return await message.edit_text(html.escape(text), **clean_kwargs)
+        raise
 
 
 # ============================================================
@@ -861,18 +966,35 @@ async def on_text_value_input(message: Message, bot: Bot):
     var_name = awaiting_text_value.pop(uid)
     new_value = message.text or ""
 
+    # 1️⃣ تحقق من صيغة الإيموجي البريميوم
+    is_valid_emoji, emoji_error = validate_premium_emoji_syntax(new_value)
+    if not is_valid_emoji:
+        awaiting_text_value[uid] = var_name
+        await message.reply(
+            f"❌ خطأ في صيغة الإيموجي البريميوم:\n"
+            f"<code>{html.escape(emoji_error)}</code>\n\n"
+            "الصيغة الصحيحة:\n"
+            "<code>&lt;tg-emoji emoji-id='123'&gt;🎶&lt;/tg-emoji&gt;</code>\n\n"
+            "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
+        )
+        return
+
+    # 2️⃣ تحقق من HTML العام
     html_error = await validate_html_text(bot, message.chat.id, new_value)
     if html_error:
-        awaiting_text_value[uid] = var_name  # نرجّعه لنفس حالة الانتظار حتى يصحح النص
+        awaiting_text_value[uid] = var_name
         await message.reply(
-            "❌ النص فيه خطأ HTML/تاق إيموجي بريميوم ولن يُحفظ حتى يصير صحيحًا:\n"
+            "❌ النص فيه خطأ HTML ولن يُحفظ حتى يصير صحيحًا:\n"
             f"<code>{html.escape(html_error)}</code>\n\n"
             "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
         )
         return
 
+    # 3️⃣ استخرج أكواد الإيموجي البريميوم تلقائياً
+    emojis_found = extract_premium_emojis(new_value)
+    
     try:
-        # احفظ مع معلومات المحرّر (الآيدي والاسم)
+        # احفظ مع معلومات المحرّر
         user = message.from_user
         editor_name = user.first_name or user.username or f"User{uid}" if user else "Unknown"
         update_text_variable(var_name, new_value, editor_id=uid, editor_name=editor_name)
@@ -881,12 +1003,20 @@ async def on_text_value_input(message: Message, bot: Bot):
         await message.reply(f"❌ فشل الحفظ:\n<code>{html.escape(str(e))}</code>")
         return
 
-    await message.reply(
+    # 4️⃣ رسالة النجاح مع معلومات الإيموجي
+    emoji_info = ""
+    if emojis_found:
+        emoji_list = "\n".join([f"  • {emoji} (ID: {emoji_id})" for emoji, emoji_id in emojis_found.items()])
+        emoji_info = f"\n\n🎯 الإيموجي البريميوم المكتشفة تلقائياً:\n{emoji_list}"
+    
+    success_msg = (
         f"✅ تم حفظ <code>{var_name}</code> بنجاح بشكل <b>دائم</b>! 🎉\n"
-        "✨ التغيير مفعّل فوراً وسيبقى حتى بعد إعادة تشغيل البوت (يُحفظ بـ Railway Volume).\n"
-        f"👤 محرّر: {editor_name} (ID: {uid})",
-        reply_markup=build_dev_keyboard(),
+        f"✨ التغيير مفعّل فوراً وسيبقى حتى بعد إعادة تشغيل البوت.\n"
+        f"👤 محرّر: {editor_name} (ID: {uid})"
+        f"{emoji_info}"
     )
+    
+    await message.reply(success_msg, reply_markup=build_dev_keyboard())
 
 
 @router.message(F.text.in_({"/start", "/help"}))
