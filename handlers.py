@@ -328,7 +328,7 @@ def render_progress_bar(percent: float, width: int = PROGRESS_BAR_WIDTH) -> str:
 # ============================================================
 # رسالة الحالة الغنية (Rich Message) — جدول + إيموجي بريميوم + شريط تظليل
 # ============================================================
-RICH_PROGRESS_BAR_WIDTH = 20
+RICH_PROGRESS_BAR_WIDTH = 33
 STATUS_EMOJI_ID = "5463010113440717314"
 STATUS_EMOJI_CHAR = "👀"
 
