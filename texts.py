@@ -143,6 +143,12 @@ STAGE_UPLOADING_VIDEO = "جارٍ رفع الفيديو وإرساله"
 
 
 # ============================================================
+# handlers.py - رسالة الحالة الغنية (Rich Status Message)
+# ============================================================
+MSG_RICH_STATUS_INTRO = "أقوم بإعداد فيديو لك. يرجى مراجعة الحالة لاحقاً..."
+
+
+# ============================================================
 # handlers.py - رسائل السجل (logger)
 # ============================================================
 LOG_PROGRESS_UPDATE_FAILED = "فشل تحديث رسالة التقدّم"
@@ -418,4 +424,5 @@ TEXTS_EN: dict[str, str] = {
         "🔓 Your daily limit is now {limit} discs every 24 hours, for 30 days."
     ),
     "BTN_LANG": "🇮🇶 Language",
+    "MSG_RICH_STATUS_INTRO": "I'm preparing a video for you. Please check the status later...",
 }
