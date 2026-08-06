@@ -332,9 +332,6 @@ RICH_PROGRESS_BAR_WIDTH = 20
 STATUS_EMOJI_ID = "5431578344472746087"
 STATUS_EMOJI_CHAR = "🤩"
 
-# إيموجي مميز لكل مرحلة (بالترتيب) — كل مرحلة جديدة تاخذ الإيموجي التالي بالقائمة
-STAGE_ICON_POOL = ["🕐", "⬇️", "🖼️", "💿", "🎬", "⬆️", "📦", "🔧", "🎨", "📤"]
-
 
 def render_rich_status_html(
     stage_text: str,
@@ -345,41 +342,37 @@ def render_rich_status_html(
     """
     يبني HTML الرسالة الغنية لعرض حالة المعالجة:
     - سطر مقدّمة
-    - جدول فيه صف عنوان: إيموجي بريميوم ثابت بالبداية + إيموجي لكل مرحلة مرّت (عادي) +
-      إيموجي المرحلة الحالية مُظلَّل (<mark>) والرقم المئوي بجانبه مباشرة
-    - صف فيه شريط تظليل (مربعات معبأة بـ <mark> حسب النسبة)
+    - جدول فيه صف عنوان: نص المرحلة الحالية فقط (نص ثابت بدون إيموجي)
+    - صف فيه سلسلة من نفس الإيموجي البريميوم: إيموجي جديد ينضاف لكل مرحلة،
+      الإيموجيات السابقة (خلصت مراحلها) تبقى مظلَّلة دايمًا، والإيموجي الأخير
+      يبين عادي مع الرقم المئوي بجانبه ويتظلل هو نفسه فقط لما يوصل 100%
     """
-    stage_icons = stage_icons or [STAGE_ICON_POOL[0]]
+    header = escape_rich_html(stage_text)
 
-    header_parts = [f'<tg-emoji emoji-id="{STATUS_EMOJI_ID}">{STATUS_EMOJI_CHAR}</tg-emoji>']
+    stage_icons = stage_icons or [STATUS_EMOJI_CHAR]
+    emoji_html = f'<tg-emoji emoji-id="{STATUS_EMOJI_ID}">{STATUS_EMOJI_CHAR}</tg-emoji>'
+
+    row_parts = []
     # الإيموجيات السابقة خلصت مراحلها ← تضل مظللة دايمًا
-    for icon in stage_icons[:-1]:
-        header_parts.append(f'<mark>{escape_rich_html(icon)}</mark>')
+    for _ in stage_icons[:-1]:
+        row_parts.append(f'<mark>{emoji_html}</mark>')
 
-    # الإيموجي الحالي: يتظلل تدريجيًا فقط لما يوصل 100%، وقبلها يبين عادي والرقم يرتفع بجانبه
-    current_icon = escape_rich_html(stage_icons[-1])
+    # الإيموجي الأخير (المضاف حديثًا): يبين عادي والرقم يرتفع جنبه، ويتظلل بس لما يوصل 100%
     if percent is not None:
         percent = max(0.0, min(100.0, percent))
         if percent >= 100:
-            header_parts.append(f'<mark>{current_icon}</mark> {int(percent)}%')
+            row_parts.append(f'<mark>{emoji_html}</mark> {int(percent)}%')
         else:
-            header_parts.append(f'{current_icon} {int(percent)}%')
+            row_parts.append(f'{emoji_html} {int(percent)}%')
     else:
-        header_parts.append(current_icon)
+        row_parts.append(emoji_html)
 
-    header = " ".join(header_parts) + " " + escape_rich_html(stage_text)
-
-    if percent is not None:
-        filled = int(round(RICH_PROGRESS_BAR_WIDTH * percent / 100))
-        empty = RICH_PROGRESS_BAR_WIDTH - filled
-        bar_cell = f'<mark>{"⠀" * filled}</mark>{"⠀" * empty}'
-    else:
-        bar_cell = "⠀" * RICH_PROGRESS_BAR_WIDTH
+    icons_row = " ".join(row_parts)
 
     return (
         f"<p>{escape_rich_html(intro_text)}</p>"
         f'<table bordered striped><tr><th align="center" valign="middle">{header}</th></tr>'
-        f'<tr><td align="left" valign="middle">{bar_cell}</td></tr></table>'
+        f'<tr><td align="left" valign="middle">{icons_row}</td></tr></table>'
     )
 
 
@@ -392,7 +385,7 @@ class StatusAnimator:
         self.user_id = user_id
         self.stage_text = texts_module.STAGE_PREPARING
         self.percent: float | None = None
-        self.stage_icons: list[str] = [STAGE_ICON_POOL[0]]
+        self.stage_icons: list[str] = [STATUS_EMOJI_CHAR]
         self._last_stage_text: str | None = texts_module.STAGE_PREPARING
         self._last_rendered: str | None = None
         self._stop_event = asyncio.Event()
@@ -401,9 +394,8 @@ class StatusAnimator:
 
     def set_stage(self, stage_text: str, percent: float | None = None) -> None:
         if stage_text != self._last_stage_text:
-            # مرحلة جديدة ← إيموجي جديد ينضاف، والرقم يروح جنبه
-            next_icon = STAGE_ICON_POOL[len(self.stage_icons) % len(STAGE_ICON_POOL)]
-            self.stage_icons.append(next_icon)
+            # مرحلة جديدة ← نسخة جديدة من نفس الإيموجي البريميوم تنضاف، والرقم يروح جنبها
+            self.stage_icons.append(STATUS_EMOJI_CHAR)
             self._last_stage_text = stage_text
         self.stage_text = stage_text
         self.percent = percent
