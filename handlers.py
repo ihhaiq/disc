@@ -1415,7 +1415,9 @@ def build_wiz_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data="wiz_color:yellow", style="primary"),
             InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data="wiz_color:red", style="primary"),
         ],
-        [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary"),
+        [InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data="wiz_color:bloody", style="primary"),
+        ],
     ])
 
 
@@ -1458,7 +1460,7 @@ async def on_wiz_color(callback, bot: Bot):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     choice = callback.data.split(":", 1)[1]
-    if choice in ("pink", "blue", "yellow", "red"):
+    if choice in ("black","green","pink", "blue", "yellow", "red","bloody"):
         developer_vinyl_choice[uid] = choice
     else:
         developer_vinyl_choice.pop(uid, None)
