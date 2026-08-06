@@ -297,7 +297,7 @@ async def send_rich_message(bot: Bot, chat_id: int, html_content: str,
             reply_parameters=reply_params,
             reply_markup=reply_markup,
         )
-    except AttributeError:
+    except (AttributeError, TypeError):
         logger.warning("sendRichMessage غير مدعوم بهالنسخة من aiogram، الرجوع لرسالة عادية")
     except Exception:
         logger.exception("فشل إرسال Rich Message، الرجوع لرسالة عادية")
@@ -385,15 +385,15 @@ class StatusAnimator:
 
         if self._rich_supported:
             try:
-                await self.bot.edit_message_rich_message(
+                await self.bot.edit_message_text(
                     chat_id=self.message.chat.id,
                     message_id=self.message.message_id,
                     rich_message=InputRichMessage(html=html_content),
                 )
                 self._last_rendered = html_content
                 return
-            except AttributeError:
-                logger.warning("editMessageRichMessage غير مدعوم بهالنسخة من aiogram، الرجوع لتحديث نصي عادي")
+            except (AttributeError, TypeError):
+                logger.warning("rich_message غير مدعوم بهالنسخة من aiogram (edit_message_text)، الرجوع لتحديث نصي عادي")
                 self._rich_supported = False
             except TelegramBadRequest:
                 return
