@@ -293,7 +293,7 @@ async def send_rich_message(bot: Bot, chat_id: int, html_content: str,
     try:
         return await bot.send_rich_message(
             chat_id=chat_id,
-            content=InputRichMessage(content=html_content, format="html"),
+            rich_message=InputRichMessage(html=html_content),
             reply_parameters=reply_params,
             reply_markup=reply_markup,
         )
@@ -302,7 +302,12 @@ async def send_rich_message(bot: Bot, chat_id: int, html_content: str,
     except Exception:
         logger.exception("فشل إرسال Rich Message، الرجوع لرسالة عادية")
 
-    return await bot.send_message(chat_id=chat_id, text=html_content, reply_markup=reply_markup)
+    # ⚠️ html_content مبني بوسوم خاصة بـ Rich Message فقط (<p>, <table>, <mark> ...)
+    # وهذي غير مدعومة بـ sendMessage العادي (parse_mode=HTML يدعم فقط b/i/u/s/code/pre/a/tg-spoiler/tg-emoji)
+    # فنحوّلها لنص خام مقروء بدل ما نرسلها كما هي ونطيح بخطأ can't parse entities
+    plain_fallback = re.sub(r"<[^>]+>", " ", html_content)
+    plain_fallback = html.unescape(re.sub(r"\s+", " ", plain_fallback)).strip()
+    return await bot.send_message(chat_id=chat_id, text=plain_fallback, reply_markup=reply_markup)
 
 
 async def reply_rich(message: Message, bot: Bot, html_content: str,
@@ -383,7 +388,7 @@ class StatusAnimator:
                 await self.bot.edit_message_rich_message(
                     chat_id=self.message.chat.id,
                     message_id=self.message.message_id,
-                    content=InputRichMessage(content=html_content, format="html"),
+                    rich_message=InputRichMessage(html=html_content),
                 )
                 self._last_rendered = html_content
                 return
