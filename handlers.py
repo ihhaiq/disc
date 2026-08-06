@@ -332,20 +332,47 @@ RICH_PROGRESS_BAR_WIDTH = 20
 STATUS_EMOJI_ID = "5431578344472746087"
 STATUS_EMOJI_CHAR = "🤩"
 
+# إيموجي مميز لكل مرحلة (بالترتيب) — كل مرحلة جديدة تاخذ الإيموجي التالي بالقائمة
+STAGE_ICON_POOL = ["🕐", "⬇️", "🖼️", "💿", "🎬", "⬆️", "📦", "🔧", "🎨", "📤"]
 
-def render_rich_status_html(stage_text: str, percent: float | None, intro_text: str) -> str:
+
+def render_rich_status_html(
+    stage_text: str,
+    percent: float | None,
+    intro_text: str,
+    stage_icons: list[str] | None = None,
+) -> str:
     """
     يبني HTML الرسالة الغنية لعرض حالة المعالجة:
     - سطر مقدّمة
-    - جدول فيه صف عنوان (إيموجي بريميوم + اسم المرحلة)
-    - وصف فيه شريط تظليل (مربعات معبأة بـ <mark> حسب النسبة) + الرقم المئوي
+    - جدول فيه صف عنوان: إيموجي بريميوم ثابت بالبداية + إيموجي لكل مرحلة مرّت (عادي) +
+      إيموجي المرحلة الحالية مُظلَّل (<mark>) والرقم المئوي بجانبه مباشرة
+    - صف فيه شريط تظليل (مربعات معبأة بـ <mark> حسب النسبة)
     """
-    header = f'<tg-emoji emoji-id="{STATUS_EMOJI_ID}">{STATUS_EMOJI_CHAR}</tg-emoji> {escape_rich_html(stage_text)}'
+    stage_icons = stage_icons or [STAGE_ICON_POOL[0]]
+
+    header_parts = [f'<tg-emoji emoji-id="{STATUS_EMOJI_ID}">{STATUS_EMOJI_CHAR}</tg-emoji>']
+    # الإيموجيات السابقة خلصت مراحلها ← تضل مظللة دايمًا
+    for icon in stage_icons[:-1]:
+        header_parts.append(f'<mark>{escape_rich_html(icon)}</mark>')
+
+    # الإيموجي الحالي: يتظلل تدريجيًا فقط لما يوصل 100%، وقبلها يبين عادي والرقم يرتفع بجانبه
+    current_icon = escape_rich_html(stage_icons[-1])
     if percent is not None:
         percent = max(0.0, min(100.0, percent))
+        if percent >= 100:
+            header_parts.append(f'<mark>{current_icon}</mark> {int(percent)}%')
+        else:
+            header_parts.append(f'{current_icon} {int(percent)}%')
+    else:
+        header_parts.append(current_icon)
+
+    header = " ".join(header_parts) + " " + escape_rich_html(stage_text)
+
+    if percent is not None:
         filled = int(round(RICH_PROGRESS_BAR_WIDTH * percent / 100))
         empty = RICH_PROGRESS_BAR_WIDTH - filled
-        bar_cell = f'<mark>{"⠀" * filled}</mark>{"⠀" * empty} {int(percent)}%'
+        bar_cell = f'<mark>{"⠀" * filled}</mark>{"⠀" * empty}'
     else:
         bar_cell = "⠀" * RICH_PROGRESS_BAR_WIDTH
 
@@ -357,7 +384,7 @@ def render_rich_status_html(stage_text: str, percent: float | None, intro_text: 
 
 
 class StatusAnimator:
-    """يحدّث رسالة الحالة الغنية (Rich Message) بشكل دوري: إيموجي + عنوان المرحلة + شريط تظليل."""
+    """يحدّث رسالة الحالة الغنية (Rich Message) بشكل دوري: إيموجي متسلسل لكل مرحلة + شريط تظليل."""
 
     def __init__(self, message: Message, bot: Bot, user_id: int = 0):
         self.message = message
@@ -365,18 +392,25 @@ class StatusAnimator:
         self.user_id = user_id
         self.stage_text = texts_module.STAGE_PREPARING
         self.percent: float | None = None
+        self.stage_icons: list[str] = [STAGE_ICON_POOL[0]]
+        self._last_stage_text: str | None = texts_module.STAGE_PREPARING
         self._last_rendered: str | None = None
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._rich_supported = True
 
     def set_stage(self, stage_text: str, percent: float | None = None) -> None:
+        if stage_text != self._last_stage_text:
+            # مرحلة جديدة ← إيموجي جديد ينضاف، والرقم يروح جنبه
+            next_icon = STAGE_ICON_POOL[len(self.stage_icons) % len(STAGE_ICON_POOL)]
+            self.stage_icons.append(next_icon)
+            self._last_stage_text = stage_text
         self.stage_text = stage_text
         self.percent = percent
 
     def _render_html(self) -> str:
         intro = tr("MSG_RICH_STATUS_INTRO", self.user_id)
-        return render_rich_status_html(self.stage_text, self.percent, intro)
+        return render_rich_status_html(self.stage_text, self.percent, intro, self.stage_icons)
 
     async def _push_update(self) -> None:
         html_content = self._render_html()
