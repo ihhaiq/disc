@@ -20,8 +20,8 @@ class HTMLToTelegramParser(HTMLParser):
         self.open_tags = []
     
     def handle_starttag(self, tag, attrs):
-        # فقط الـ tags المدعومة
-        if tag in ('b', 'strong', 'i', 'em', 'code', 'pre', 'u', 's', 'a'):
+        # فقط الـ tags المدعومة (+ tg-emoji للإيموجي البريميوم، مدعومة أصلاً بـ Telegram HTML)
+        if tag in ('b', 'strong', 'i', 'em', 'code', 'pre', 'u', 's', 'a', 'tg-emoji'):
             self.open_tags.append(tag)
             if tag in ('b', 'strong'):
                 self.text += '<b>'
@@ -38,9 +38,15 @@ class HTMLToTelegramParser(HTMLParser):
             elif tag == 'a':
                 href = dict(attrs).get('href', '#')
                 self.text += f'<a href="{href}">'
+            elif tag == 'tg-emoji':
+                # نحافظ على emoji-id كما هو (أرقام فقط لحماية إضافية) حتى لا يضيع
+                # ونقدر لاحقًا نبني منه custom_emoji entity صحيح
+                emoji_id = dict(attrs).get('emoji-id', '')
+                emoji_id = emoji_id if emoji_id.isdigit() else ''
+                self.text += f'<tg-emoji emoji-id="{emoji_id}">'
     
     def handle_endtag(self, tag):
-        if tag in ('b', 'strong', 'i', 'em', 'code', 'pre', 'u', 's', 'a'):
+        if tag in ('b', 'strong', 'i', 'em', 'code', 'pre', 'u', 's', 'a', 'tg-emoji'):
             if self.open_tags and self.open_tags[-1] in (tag, 'strong' if tag == 'b' else tag, 'em' if tag == 'i' else tag):
                 self.open_tags.pop()
             if tag in ('b', 'strong'):
@@ -57,6 +63,8 @@ class HTMLToTelegramParser(HTMLParser):
                 self.text += '</s>'
             elif tag == 'a':
                 self.text += '</a>'
+            elif tag == 'tg-emoji':
+                self.text += '</tg-emoji>'
     
     def handle_data(self, data):
         self.text += data
