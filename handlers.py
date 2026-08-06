@@ -320,46 +320,95 @@ def render_progress_bar(percent: float, width: int = PROGRESS_BAR_WIDTH) -> str:
     return "▓" * filled + "░" * (width - filled)
 
 
-class StatusAnimator:
-    """يحدّث رسالة الحالة بالتليكرام بشكل دوري: ساعة رملية متحركة + نص/شريط تقدّم."""
+# ============================================================
+# رسالة الحالة الغنية (Rich Message) — جدول + إيموجي بريميوم + شريط تظليل
+# ============================================================
+RICH_PROGRESS_BAR_WIDTH = 20
+STATUS_EMOJI_ID = "5431578344472746087"
+STATUS_EMOJI_CHAR = "🤩"
 
-    def __init__(self, message: Message):
+
+def render_rich_status_html(stage_text: str, percent: float | None, intro_text: str) -> str:
+    """
+    يبني HTML الرسالة الغنية لعرض حالة المعالجة:
+    - سطر مقدّمة
+    - جدول فيه صف عنوان (إيموجي بريميوم + اسم المرحلة)
+    - وصف فيه شريط تظليل (مربعات معبأة بـ <mark> حسب النسبة) + الرقم المئوي
+    """
+    header = f'<tg-emoji emoji-id="{STATUS_EMOJI_ID}">{STATUS_EMOJI_CHAR}</tg-emoji> {escape_rich_html(stage_text)}'
+    if percent is not None:
+        percent = max(0.0, min(100.0, percent))
+        filled = int(round(RICH_PROGRESS_BAR_WIDTH * percent / 100))
+        empty = RICH_PROGRESS_BAR_WIDTH - filled
+        bar_cell = f'<mark>{"⠀" * filled}</mark>{"⠀" * empty} {int(percent)}%'
+    else:
+        bar_cell = "⠀" * RICH_PROGRESS_BAR_WIDTH
+
+    return (
+        f"<p>{escape_rich_html(intro_text)}</p>"
+        f'<table bordered striped><tr><th align="center" valign="middle">{header}</th></tr>'
+        f'<tr><td align="left" valign="middle">{bar_cell}</td></tr></table>'
+    )
+
+
+class StatusAnimator:
+    """يحدّث رسالة الحالة الغنية (Rich Message) بشكل دوري: إيموجي + عنوان المرحلة + شريط تظليل."""
+
+    def __init__(self, message: Message, bot: Bot, user_id: int = 0):
         self.message = message
+        self.bot = bot
+        self.user_id = user_id
         self.stage_text = texts_module.STAGE_PREPARING
         self.percent: float | None = None
-        self._frame = 0
         self._last_rendered: str | None = None
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
+        self._rich_supported = True
 
     def set_stage(self, stage_text: str, percent: float | None = None) -> None:
         self.stage_text = stage_text
         self.percent = percent
 
-    def _render(self) -> str:
-        hourglass = HOURGLASS_FRAMES[self._frame % len(HOURGLASS_FRAMES)]
-        if self.percent is not None:
-            bar = render_progress_bar(self.percent)
-            return f"{hourglass} {self.stage_text}\n{bar}  {int(self.percent)}%"
-        dots = "." * ((self._frame % 3) + 1)
-        return f"{hourglass} {self.stage_text}{dots}"
+    def _render_html(self) -> str:
+        intro = tr("MSG_RICH_STATUS_INTRO", self.user_id)
+        return render_rich_status_html(self.stage_text, self.percent, intro)
+
+    async def _push_update(self) -> None:
+        html_content = self._render_html()
+        if html_content == self._last_rendered:
+            return
+
+        if self._rich_supported:
+            try:
+                await self.bot.edit_message_rich_message(
+                    chat_id=self.message.chat.id,
+                    message_id=self.message.message_id,
+                    content=InputRichMessage(content=html_content, format="html"),
+                )
+                self._last_rendered = html_content
+                return
+            except AttributeError:
+                logger.warning("editMessageRichMessage غير مدعوم بهالنسخة من aiogram، الرجوع لتحديث نصي عادي")
+                self._rich_supported = False
+            except TelegramBadRequest:
+                return
+            except Exception:
+                logger.exception("فشل تحديث رسالة الحالة الغنية")
+                return
+
+        # fallback: تحديث نصي عادي بدون جدول/تظليل (لو النسخة ما تدعم تعديل الريتش ميسج)
+        plain = self.stage_text + (f" {int(self.percent)}%" if self.percent is not None else "…")
+        try:
+            await self.message.edit_text(plain)
+            self._last_rendered = html_content
+        except TelegramBadRequest:
+            pass
+        except Exception:
+            logger.exception(texts_module.LOG_PROGRESS_UPDATE_FAILED)
 
     async def _run(self) -> None:
         while not self._stop_event.is_set():
-            self._frame += 1
-            text = self._render()
-            if text != self._last_rendered:
-                try:
-                    entities = build_premium_entities_from_text(text)
-                    if entities:
-                        await self.message.edit_text(text, entities=entities)
-                    else:
-                        await self.message.edit_text(text)
-                    self._last_rendered = text
-                except TelegramBadRequest:
-                    pass
-                except Exception:
-                    logger.exception(texts_module.LOG_PROGRESS_UPDATE_FAILED)
+            await self._push_update()
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=STATUS_UPDATE_INTERVAL_SECONDS)
             except asyncio.TimeoutError:
@@ -572,8 +621,11 @@ async def process_job(bot: Bot, job: dict) -> None:
     out_path = tmp(f"{uid}_{job_id}_out.mp4")
     job["temp_paths"] = [audio_path, thumb_path, disc_path, out_path]
 
-    status = await reply_with_premium_emoji(message, tr("MSG_AUDIO_RECEIVED", uid))
-    animator = StatusAnimator(status)
+    initial_html = render_rich_status_html(
+        tr("STAGE_PREPARING", uid), None, tr("MSG_RICH_STATUS_INTRO", uid)
+    )
+    status = await send_rich_message(bot, message.chat.id, initial_html, reply_to_message_id=message.message_id)
+    animator = StatusAnimator(status, bot, uid)
     animator.start()
 
     try:
@@ -583,11 +635,11 @@ async def process_job(bot: Bot, job: dict) -> None:
 
         thumbnail_file_id = None
         if job.get("thumbnail_file_id"):
-    # المستخدم رفع صورة يدويًا (بمعالج التخصيص أو الإنشاء السريع) — لها الأولوية دائمًا
+            # المستخدم رفع صورة يدويًا (بمعالج التخصيص أو الإنشاء السريع) — لها الأولوية دائمًا
             thumbnail_file_id = job["thumbnail_file_id"]
         elif getattr(audio, "thumbnail", None) is not None:
             thumbnail_file_id = audio.thumbnail.file_id
-        
+
         if thumbnail_file_id:
             animator.set_stage(tr("STAGE_DOWNLOADING_THUMBNAIL", uid))
             await download_with_retries(bot, thumbnail_file_id, thumb_path, timeout_seconds=60, retries=2)
@@ -1419,6 +1471,7 @@ def build_wiz_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary")],
         [InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data="wiz_color:bloody", style="primary")],
     ])
+
 
 def build_wiz_speed_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
     labels = [
