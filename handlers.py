@@ -676,19 +676,23 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
         is_selected = current == value or (current is None and value == "default")
         return f"{text} ✅" if is_selected else text
 
+    def btn_style(value: str) -> str:
+        is_selected = current == value or (current is None and value == "default")
+        return "success" if is_selected else "primary"
+
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=label("BTN_VINYL_BLACK", "default"), callback_data="vinyl:default")],
+        [InlineKeyboardButton(text=label("BTN_VINYL_BLACK", "default"), callback_data="vinyl:default", style=btn_style("default"))],
         [
-            InlineKeyboardButton(text=label("BTN_VINYL_PINK", "pink"), callback_data="vinyl:pink"),
-            InlineKeyboardButton(text=label("BTN_VINYL_BLUE", "blue"), callback_data="vinyl:blue"),
+            InlineKeyboardButton(text=label("BTN_VINYL_PINK", "pink"), callback_data="vinyl:pink", style=btn_style("pink")),
+            InlineKeyboardButton(text=label("BTN_VINYL_BLUE", "blue"), callback_data="vinyl:blue", style=btn_style("blue")),
         ],
         [
-            InlineKeyboardButton(text=label("BTN_VINYL_YELLOW", "yellow"), callback_data="vinyl:yellow"),
-            InlineKeyboardButton(text=label("BTN_VINYL_RED", "red"), callback_data="vinyl:red"),
+            InlineKeyboardButton(text=label("BTN_VINYL_YELLOW", "yellow"), callback_data="vinyl:yellow", style=btn_style("yellow")),
+            InlineKeyboardButton(text=label("BTN_VINYL_RED", "red"), callback_data="vinyl:red", style=btn_style("red")),
         ],
         [
-            InlineKeyboardButton(text=label("BTN_VINYL_GREEN", "green"), callback_data="vinyl:green"),
-            InlineKeyboardButton(text=label("BTN_VINYL_BLOODY", "bloody"), callback_data="vinyl:bloody"),
+            InlineKeyboardButton(text=label("BTN_VINYL_GREEN", "green"), callback_data="vinyl:green", style=btn_style("green")),
+            InlineKeyboardButton(text=label("BTN_VINYL_BLOODY", "bloody"), callback_data="vinyl:bloody", style=btn_style("bloody")),
         ],
         [InlineKeyboardButton(text=tr("BTN_BACK", user_id), callback_data="vinyl_menu:back")],
 
@@ -1402,16 +1406,16 @@ async def on_mode_custom(callback, bot: Bot):
 
 def build_wiz_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=tr("BTN_VINYL_BLACK", user_id), callback_data="wiz_color:default")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_BLACK", user_id), callback_data="wiz_color:default", style="primary")],
         [
-            InlineKeyboardButton(text=tr("BTN_VINYL_PINK", user_id), callback_data="wiz_color:pink"),
-            InlineKeyboardButton(text=tr("BTN_VINYL_BLUE", user_id), callback_data="wiz_color:blue"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_PINK", user_id), callback_data="wiz_color:pink", style="primary"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_BLUE", user_id), callback_data="wiz_color:blue", style="primary"),
         ],
         [
-            InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data="wiz_color:yellow"),
-            InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data="wiz_color:red"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data="wiz_color:yellow", style="primary"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data="wiz_color:red", style="primary"),
         ],
-        [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary")],
     ])
 
 
@@ -1441,7 +1445,7 @@ def build_wiz_segment_keyboard(total_duration: float, user_id: int = 0) -> Inlin
         start = i * 60
         if start >= total_duration:
             break
-        buttons.append(InlineKeyboardButton(text=tr("BTN_WIZ_SEGMENT_FMT", user_id).format(n=i + 1), callback_data=f"wiz_segment:{start}"))
+        buttons.append(InlineKeyboardButton(text=tr("BTN_WIZ_SEGMENT_FMT", user_id).format(n=i + 1), callback_data=f"wiz_segment:{start}", style="success"))
     rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
