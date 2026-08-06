@@ -1144,6 +1144,35 @@ async def on_cancel_text_edit(message: Message):
         await message.reply("❌ تم إلغاء التحرير.")
 
 
+def normalize_dev_input(text: str) -> str:
+    """
+    يطبّع صيغ شائعة قد يلصقها المطور (مثل ماركداون تليكرام الرسمي لصيغة V2)
+    إلى صيغة HTML المدعومة عندنا، عشان ما ترفضها تليكرام أو تطلع فاضية بالغلط:
+
+    - ![إيموجي](tg://emoji?id=123) → <tg-emoji emoji-id="123">إيموجي</tg-emoji>
+      (هذي هي صيغة تليكرام الرسمية للإيموجي المميز بماركداون V2)
+    - \\( \\) \\. \\! إلخ (هروب MarkdownV2) → تُزال لأنها غير مطلوبة بوضع HTML
+    - عناوين ماركداون بأول السطر (# ## ### ...) → تتحول لعريض <b>...</b>
+    """
+    if not text:
+        return text
+
+    # 1) صيغة الإيموجي الرسمية بماركداون V2: ![emoji](tg://emoji?id=ID)
+    text = re.sub(
+        r'!\[(.+?)\]\(tg://emoji\?id=(\d+)\)',
+        r'<tg-emoji emoji-id="\2">\1</tg-emoji>',
+        text,
+    )
+
+    # 2) إزالة هروب MarkdownV2 غير المطلوب بوضع HTML (مثل \( \) \. \! \-)
+    text = re.sub(r'\\([\\_*\[\]()~`>#+\-=|{}.!])', r'\1', text)
+
+    # 3) عناوين ماركداون بأول السطر (# .. ######) → عريض
+    text = re.sub(r'^#{1,6}\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+
+    return text
+
+
 @router.message(lambda m: bool(m.from_user)
                 and m.from_user.id == config.DEVELOPER_ID
                 and m.from_user.id in awaiting_text_value)
@@ -1152,7 +1181,18 @@ async def on_text_value_input(message: Message, bot: Bot):
     pending = awaiting_text_value.pop(uid)
     var_name = pending["var_name"]
     lang = pending["lang"]
-    new_value = message.text or ""
+    new_value = normalize_dev_input(message.text or "")
+
+    if not new_value.strip():
+        awaiting_text_value[uid] = pending
+        await message.reply(
+            "❌ النص وصلني فاضي (أو صار فاضي بعد تنظيفه). تليكرام يرفض حفظ رسالة فاضية.\n\n"
+            "لو أرسلت رسالة \"غنية\" (Rich Message) بتنسيق خاص، هذا المحرر يدعم HTML بس + "
+            "صيغة ماركداون الإيموجي الرسمية <code>![إيموجي](tg://emoji?id=ID)</code>، "
+            "ولا يدعم عناصر زي <code>&lt;footer&gt;</code> أو أي وسم HTML غير مدعوم بتليكرام.\n\n"
+            "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
+        )
+        return
 
     # 1️⃣ تحقق من صيغة الإيموجي البريميوم
     is_valid_emoji, emoji_error = validate_premium_emoji_syntax(new_value)
@@ -1162,7 +1202,9 @@ async def on_text_value_input(message: Message, bot: Bot):
             f"❌ خطأ في صيغة الإيموجي البريميوم:\n"
             f"<code>{html.escape(emoji_error)}</code>\n\n"
             "الصيغة الصحيحة:\n"
-            "<code>&lt;tg-emoji emoji-id='123'&gt;🎶&lt;/tg-emoji&gt;</code>\n\n"
+            "<code>&lt;tg-emoji emoji-id='123'&gt;🎶&lt;/tg-emoji&gt;</code>\n"
+            "أو صيغة ماركداون تليكرام الرسمية:\n"
+            "<code>![🎶](tg://emoji?id=123)</code>\n\n"
             "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
         )
         return
