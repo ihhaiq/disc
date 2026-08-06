@@ -42,7 +42,11 @@ def load_custom_texts_into_memory() -> None:
         logger.info(f"📝 تم تحميل {len(custom_list)} نص مخصص من JSON الدائم")
         for var_name, entry in custom_list.items():
             value = entry.get("value", "")
-            setattr(texts_module, var_name, value)
+            if var_name.startswith("EN::"):
+                en_key = var_name[len("EN::"):]
+                texts_module.TEXTS_EN[en_key] = value
+            else:
+                setattr(texts_module, var_name, value)
             editor_name = entry.get("editor_name", "Unknown")
             updated_at = entry.get("updated_at", 0)
             import datetime
@@ -73,7 +77,7 @@ awaiting_whitelist_add: set[int] = set()
 TEXTS_PER_PAGE = 5
 TEXTS_FILE_PATH = os.path.join(config.BASE_DIR, "texts.py")
 dev_text_edit_page: dict[int, int] = {}
-awaiting_text_value: dict[int, str] = {}
+awaiting_text_value: dict[int, dict] = {}  # {"var_name": str, "lang": "ar"|"en"}
 
 HOURGLASS_FRAMES = ["⏳", "⌛"]
 PROGRESS_BAR_WIDTH = 12
@@ -705,7 +709,8 @@ def build_dev_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=texts_module.BTN_VINYL_BLUE, callback_data="vinyl:blue")],
         [InlineKeyboardButton(text=texts_module.BTN_VINYL_GREEN, callback_data="vinyl:green")],
         [InlineKeyboardButton(text=texts_module.BTN_DEV_SET_MENU_IMAGE, callback_data="vinyl_menu_image:set")],
-        [InlineKeyboardButton(text="✏️ تحرير النصوص", callback_data="dev_text:page:0")],
+        [InlineKeyboardButton(text="✏️ تحرير النصوص (عربي)", callback_data="dev_text:page:ar:0")],
+        [InlineKeyboardButton(text="✏️ Edit Texts (English)", callback_data="dev_text:page:en:0")],
         [InlineKeyboardButton(text="🛡️ القائمة البيضاء", callback_data="dev_whitelist:open")],
     ])
 
@@ -731,8 +736,11 @@ def _whitelist_text() -> str:
 
 # ============================================================
 # محرر النصوص (لوحة المطور) — يعرض متغيرات texts.py بصفحات (5 بكل صفحة)
+# يدعم لغتين منفصلتين: "ar" (نصوص texts.py الأصلية) و "en" (قاموس TEXTS_EN)
 # ============================================================
-def get_editable_text_names() -> list[str]:
+def get_editable_text_names(lang: str = "ar") -> list[str]:
+    if lang == "en":
+        return sorted(texts_module.TEXTS_EN.keys())
     names = []
     for name in dir(texts_module):
         if name.startswith("_"):
@@ -743,21 +751,27 @@ def get_editable_text_names() -> list[str]:
     return sorted(names)
 
 
-def build_text_list_keyboard(page: int) -> InlineKeyboardMarkup:
-    names = get_editable_text_names()
+def get_editable_text_value(var_name: str, lang: str) -> str | None:
+    if lang == "en":
+        return texts_module.TEXTS_EN.get(var_name)
+    return getattr(texts_module, var_name, None)
+
+
+def build_text_list_keyboard(page: int, lang: str = "ar") -> InlineKeyboardMarkup:
+    names = get_editable_text_names(lang)
     start = page * TEXTS_PER_PAGE
     page_names = names[start:start + TEXTS_PER_PAGE]
 
     rows = [
-        [InlineKeyboardButton(text=name, callback_data=f"dev_text:edit:{name}")]
+        [InlineKeyboardButton(text=name, callback_data=f"dev_text:edit:{lang}:{name}")]
         for name in page_names
     ]
 
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton(text="◀️ السابق", callback_data=f"dev_text:page:{page - 1}"))
+        nav_row.append(InlineKeyboardButton(text="◀️ السابق", callback_data=f"dev_text:page:{lang}:{page - 1}"))
     if start + TEXTS_PER_PAGE < len(names):
-        nav_row.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"dev_text:page:{page + 1}"))
+        nav_row.append(InlineKeyboardButton(text="التالي ▶️", callback_data=f"dev_text:page:{lang}:{page + 1}"))
     if nav_row:
         rows.append(nav_row)
 
@@ -765,11 +779,12 @@ def build_text_list_keyboard(page: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _text_list_header(page: int) -> str:
-    names = get_editable_text_names()
+def _text_list_header(page: int, lang: str = "ar") -> str:
+    names = get_editable_text_names(lang)
     total = len(names)
     total_pages = max(1, math.ceil(total / TEXTS_PER_PAGE))
-    return f"✏️ تحرير النصوص — صفحة {page + 1}/{total_pages} ({total} متغيّر):"
+    lang_label = "English" if lang == "en" else "عربي"
+    return f"✏️ تحرير النصوص ({lang_label}) — صفحة {page + 1}/{total_pages} ({total} متغيّر):"
 
 
 def process_text_markup(text: str) -> str:
@@ -799,23 +814,37 @@ def process_text_markup(text: str) -> str:
     return text
 
 
-def update_text_variable(var_name: str, new_value: str, editor_id: int = 0, editor_name: str = "") -> None:
+def update_text_variable(var_name: str, new_value: str, editor_id: int = 0,
+                          editor_name: str = "", lang: str = "ar") -> None:
     """
     احفظ التعديل بـ JSON دائم (custom_texts.json) بدل تعديل texts.py مباشرة.
     - يحفظ فوراً بـ DATA_DIR (مربوط بـ Railway Volume)
     - يبقى بعد Restart/Redeploy
     - يحتفظ بمعلومات المحرّر والوقت
+    - يدعم لغتين منفصلتين: "ar" (يعدّل texts.py) و "en" (يعدّل TEXTS_EN)
     """
     # معالجة النص (تحويل الصيغ الخاصة + تنظيف HTML)
     processed_value = process_text_markup(new_value)
-    
+
+    if lang == "en":
+        # تحقق إن المتغيّر موجود أصلاً بقاموس TEXTS_EN
+        if var_name not in texts_module.TEXTS_EN:
+            raise ValueError(f"المتغيّر {var_name} غير موجود بقاموس TEXTS_EN")
+
+        # احفظ بـ custom_texts.json بمفتاح مميز عشان ما يتعارض مع النسخة العربية
+        custom_texts.set_custom(f"EN::{var_name}", processed_value, editor_id=editor_id, editor_name=editor_name)
+
+        # حدّث الذاكرة الحالية أيضاً
+        texts_module.TEXTS_EN[var_name] = processed_value
+        return
+
     # تحقق إن المتغيّر موجود بـ texts.py
     if not hasattr(texts_module, var_name):
         raise ValueError(f"المتغيّر {var_name} غير موجود بملف texts.py")
-    
+
     # احفظ بـ custom_texts.json (دائم ويبقى بعد Restart)
     custom_texts.set_custom(var_name, processed_value, editor_id=editor_id, editor_name=editor_name)
-    
+
     # حدّث الذاكرة الحالية أيضاً (حتى لا تحتاج restart)
     setattr(texts_module, var_name, processed_value)
 
@@ -949,9 +978,10 @@ async def on_dev_text_page(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
         await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
-    page = int(callback.data.split(":", 2)[2])
+    _, _, lang, page_str = callback.data.split(":", 3)
+    page = int(page_str)
     dev_text_edit_page[callback.from_user.id] = page
-    await callback.message.edit_text(_text_list_header(page), reply_markup=build_text_list_keyboard(page))
+    await callback.message.edit_text(_text_list_header(page, lang), reply_markup=build_text_list_keyboard(page, lang))
     await callback.answer()
 
 
@@ -960,13 +990,13 @@ async def on_dev_text_edit(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
         await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
         return
-    var_name = callback.data.split(":", 2)[2]
-    current_value = getattr(texts_module, var_name, None)
+    _, _, lang, var_name = callback.data.split(":", 3)
+    current_value = get_editable_text_value(var_name, lang)
     if current_value is None:
         await callback.answer("⚠️ المتغيّر غير موجود", show_alert=True)
         return
 
-    awaiting_text_value[callback.from_user.id] = var_name
+    awaiting_text_value[callback.from_user.id] = {"var_name": var_name, "lang": lang}
     preview = current_value if len(current_value) <= 500 else current_value[:500] + "…"
     escaped_preview = html.escape(preview)
     await callback.message.reply(
@@ -1002,13 +1032,15 @@ async def on_cancel_text_edit(message: Message):
                 and m.from_user.id in awaiting_text_value)
 async def on_text_value_input(message: Message, bot: Bot):
     uid = message.from_user.id
-    var_name = awaiting_text_value.pop(uid)
+    pending = awaiting_text_value.pop(uid)
+    var_name = pending["var_name"]
+    lang = pending["lang"]
     new_value = message.text or ""
 
     # 1️⃣ تحقق من صيغة الإيموجي البريميوم
     is_valid_emoji, emoji_error = validate_premium_emoji_syntax(new_value)
     if not is_valid_emoji:
-        awaiting_text_value[uid] = var_name
+        awaiting_text_value[uid] = pending
         await message.reply(
             f"❌ خطأ في صيغة الإيموجي البريميوم:\n"
             f"<code>{html.escape(emoji_error)}</code>\n\n"
@@ -1021,7 +1053,7 @@ async def on_text_value_input(message: Message, bot: Bot):
     # 2️⃣ تحقق من HTML العام
     html_error = await validate_html_text(bot, message.chat.id, new_value)
     if html_error:
-        awaiting_text_value[uid] = var_name
+        awaiting_text_value[uid] = pending
         await message.reply(
             "❌ النص فيه خطأ HTML ولن يُحفظ حتى يصير صحيحًا:\n"
             f"<code>{html.escape(html_error)}</code>\n\n"
@@ -1036,7 +1068,7 @@ async def on_text_value_input(message: Message, bot: Bot):
         # احفظ مع معلومات المحرّر
         user = message.from_user
         editor_name = user.first_name or user.username or f"User{uid}" if user else "Unknown"
-        update_text_variable(var_name, new_value, editor_id=uid, editor_name=editor_name)
+        update_text_variable(var_name, new_value, editor_id=uid, editor_name=editor_name, lang=lang)
     except Exception as e:
         logger.exception("فشل حفظ النص المخصص")
         await message.reply(f"❌ فشل الحفظ:\n<code>{html.escape(str(e))}</code>")
@@ -1047,9 +1079,10 @@ async def on_text_value_input(message: Message, bot: Bot):
     if emojis_found:
         emoji_list = "\n".join([f"  • {emoji} (ID: {emoji_id})" for emoji, emoji_id in emojis_found.items()])
         emoji_info = f"\n\n🎯 الإيموجي البريميوم المكتشفة تلقائياً:\n{emoji_list}"
-    
+
+    lang_label = "English" if lang == "en" else "عربي"
     success_msg = (
-        f"✅ تم حفظ <code>{var_name}</code> بنجاح بشكل <b>دائم</b>! 🎉\n"
+        f"✅ تم حفظ <code>{var_name}</code> ({lang_label}) بنجاح بشكل <b>دائم</b>! 🎉\n"
         f"✨ التغيير مفعّل فوراً وسيبقى حتى بعد إعادة تشغيل البوت.\n"
         f"👤 محرّر: {editor_name} (ID: {uid})"
         f"{emoji_info}"
@@ -1180,7 +1213,7 @@ async def on_mode_quick(callback, bot: Bot):
     uid = callback.from_user.id if callback.from_user else 0
     pending = _get_pending_audio_or_none(uid)
     if not pending:
-        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
 
     audio = pending["audio"]
@@ -1188,11 +1221,11 @@ async def on_mode_quick(callback, bot: Bot):
         pending_audio.pop(uid, None)
         job = dict(pending)
         job["segment_start"] = 0.0
-        await edit_text_with_premium_emoji(callback.message, texts_module.MSG_JOB_QUEUED)
+        await edit_text_with_premium_emoji(callback.message, tr("MSG_JOB_QUEUED", uid))
         await _launch_job(bot, uid, job)
     else:
         pending_images[uid] = {"quick_mode": True, "audio_message_id": pending["message"].message_id}
-        await callback.message.edit_text(texts_module.MSG_QUICK_NEED_IMAGE)
+        await callback.message.edit_text(tr("MSG_QUICK_NEED_IMAGE", uid))
     await callback.answer()
 
 
@@ -1201,55 +1234,55 @@ async def on_mode_custom(callback, bot: Bot):
     uid = callback.from_user.id if callback.from_user else 0
     pending = _get_pending_audio_or_none(uid)
     if not pending:
-        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     wizard_state[uid] = {}
-    await callback.message.edit_text(texts_module.MSG_WIZ_CHOOSE_COLOR, reply_markup=build_wiz_color_keyboard())
+    await callback.message.edit_text(tr("MSG_WIZ_CHOOSE_COLOR", uid), reply_markup=build_wiz_color_keyboard(uid))
     await callback.answer()
 
 
-def build_wiz_color_keyboard() -> InlineKeyboardMarkup:
+def build_wiz_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts_module.BTN_VINYL_BLACK, callback_data="wiz_color:default")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_BLACK", user_id), callback_data="wiz_color:default")],
         [
-            InlineKeyboardButton(text=texts_module.BTN_VINYL_PINK, callback_data="wiz_color:pink"),
-            InlineKeyboardButton(text=texts_module.BTN_VINYL_BLUE, callback_data="wiz_color:blue"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_PINK", user_id), callback_data="wiz_color:pink"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_BLUE", user_id), callback_data="wiz_color:blue"),
         ],
         [
-            InlineKeyboardButton(text=texts_module.BTN_VINYL_YELLOW, callback_data="wiz_color:yellow"),
-            InlineKeyboardButton(text=texts_module.BTN_VINYL_RED, callback_data="wiz_color:red"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data="wiz_color:yellow"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data="wiz_color:red"),
         ],
-        [InlineKeyboardButton(text=texts_module.BTN_VINYL_GREEN, callback_data="wiz_color:green")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green")],
     ])
 
 
-def build_wiz_speed_keyboard() -> InlineKeyboardMarkup:
+def build_wiz_speed_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
     labels = [
-        (texts_module.SPEED_LABEL_FULL, "full"),
-        (texts_module.SPEED_LABEL_8RPM, "8"),
-        (texts_module.SPEED_LABEL_33RPM, "33"),
-        (texts_module.SPEED_LABEL_45RPM, "45"),
+        (tr("SPEED_LABEL_FULL", user_id), "full"),
+        (tr("SPEED_LABEL_8RPM", user_id), "8"),
+        (tr("SPEED_LABEL_33RPM", user_id), "33"),
+        (tr("SPEED_LABEL_45RPM", user_id), "45"),
     ]
     buttons = [InlineKeyboardButton(text=label, callback_data=f"wiz_speed:{value}") for label, value in labels]
     return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:]])
 
 
-def build_wiz_image_keyboard(has_thumbnail: bool) -> InlineKeyboardMarkup:
+def build_wiz_image_keyboard(has_thumbnail: bool, user_id: int = 0) -> InlineKeyboardMarkup:
     rows = []
     if has_thumbnail:
-        rows.append([InlineKeyboardButton(text=texts_module.BTN_WIZ_SKIP_IMAGE, callback_data="wiz_image:skip")])
-    rows.append([InlineKeyboardButton(text=texts_module.BTN_CANCEL, callback_data="cancel_queue")])
+        rows.append([InlineKeyboardButton(text=tr("BTN_WIZ_SKIP_IMAGE", user_id), callback_data="wiz_image:skip")])
+    rows.append([InlineKeyboardButton(text=tr("BTN_CANCEL", user_id), callback_data="cancel_queue")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_wiz_segment_keyboard(total_duration: float) -> InlineKeyboardMarkup:
+def build_wiz_segment_keyboard(total_duration: float, user_id: int = 0) -> InlineKeyboardMarkup:
     minutes_count = max(1, math.ceil(total_duration / 60))
     buttons = []
     for i in range(minutes_count):
         start = i * 60
         if start >= total_duration:
             break
-        buttons.append(InlineKeyboardButton(text=texts_module.BTN_WIZ_SEGMENT_FMT.format(n=i + 1), callback_data=f"wiz_segment:{start}"))
+        buttons.append(InlineKeyboardButton(text=tr("BTN_WIZ_SEGMENT_FMT", user_id).format(n=i + 1), callback_data=f"wiz_segment:{start}"))
     rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1259,14 +1292,14 @@ async def on_wiz_color(callback, bot: Bot):
     uid = callback.from_user.id if callback.from_user else 0
     state = wizard_state.get(uid)
     if state is None or not _get_pending_audio_or_none(uid):
-        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     choice = callback.data.split(":", 1)[1]
     if choice in ("pink", "blue", "yellow", "red"):
         developer_vinyl_choice[uid] = choice
     else:
         developer_vinyl_choice.pop(uid, None)
-    await callback.message.edit_text(texts_module.MSG_WIZ_CHOOSE_SPEED, reply_markup=build_wiz_speed_keyboard())
+    await callback.message.edit_text(tr("MSG_WIZ_CHOOSE_SPEED", uid), reply_markup=build_wiz_speed_keyboard(uid))
     await callback.answer()
 
 
@@ -1276,13 +1309,13 @@ async def on_wiz_speed(callback, bot: Bot):
     state = wizard_state.get(uid)
     pending = _get_pending_audio_or_none(uid)
     if state is None or not pending:
-        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     value = callback.data.split(":", 1)[1]
     user_rotation_seconds[uid] = 0.0 if value == "full" else 60 / float(value)
 
     has_thumb = bool(pending["audio"].thumbnail)
-    await callback.message.edit_text(texts_module.MSG_WIZ_CHOOSE_IMAGE, reply_markup=build_wiz_image_keyboard(has_thumb))
+    await callback.message.edit_text(tr("MSG_WIZ_CHOOSE_IMAGE", uid), reply_markup=build_wiz_image_keyboard(has_thumb, uid))
     await callback.answer()
 
 
@@ -1292,10 +1325,10 @@ async def on_wiz_image_skip(callback, bot: Bot):
     pending = _get_pending_audio_or_none(uid)
     state = wizard_state.get(uid)
     if state is None or not pending:
-        await callback.answer(texts_module.MSG_WIZ_EXPIRED, show_alert=True)
+        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     if not pending["audio"].thumbnail:
-        await callback.answer(texts_module.MSG_WIZ_NO_IMAGE_TO_SKIP, show_alert=True)
+        await callback.answer(tr("MSG_WIZ_NO_IMAGE_TO_SKIP", uid), show_alert=True)
         return
     await _wiz_advance_to_segment_or_finish(bot, uid, callback.message, callback.message.edit_text)
     await callback.answer()
@@ -1312,7 +1345,7 @@ async def _wiz_advance_to_segment_or_finish(bot: Bot, uid: int, target_message: 
         await _finish_wizard(bot, uid, send_func, segment_start=0.0)
         return
 
-    await send_func(texts_module.MSG_WIZ_CHOOSE_SEGMENT, reply_markup=build_wiz_segment_keyboard(total_duration))
+    await send_func(tr("MSG_WIZ_CHOOSE_SEGMENT", uid), reply_markup=build_wiz_segment_keyboard(total_duration, uid))
 
 
 @router.callback_query(F.data.startswith("wiz_segment:"))
@@ -1327,18 +1360,19 @@ async def _finish_wizard(bot: Bot, uid: int, send_func, segment_start: float) ->
     pending = pending_audio.pop(uid, None)
     wizard_state.pop(uid, None)
     if not pending:
-        await send_func(texts_module.MSG_WIZ_EXPIRED)
+        await send_func(tr("MSG_WIZ_EXPIRED", uid))
         return
 
     job = dict(pending)
     job["uid"] = uid
     job["segment_start"] = segment_start
 
-    entities = build_premium_entities_from_text(texts_module.MSG_WIZ_STARTING)
+    starting_text = tr("MSG_WIZ_STARTING", uid)
+    entities = build_premium_entities_from_text(starting_text)
     if entities:
-        await send_func(texts_module.MSG_WIZ_STARTING, entities=entities)
+        await send_func(starting_text, entities=entities)
     else:
-        await send_func(texts_module.MSG_WIZ_STARTING)
+        await send_func(starting_text)
     await _launch_job(bot, uid, job)
 
 
@@ -1352,7 +1386,8 @@ async def on_cancel_queue(callback, bot: Bot):
 
 @router.callback_query(F.data == "add_image")
 async def on_add_image(callback, bot: Bot):
-    await callback.message.reply(texts_module.MSG_SEND_IMAGE_NOW)
+    uid = callback.from_user.id if callback.from_user else 0
+    await callback.message.reply(tr("MSG_SEND_IMAGE_NOW", uid))
     pending_images[callback.from_user.id] = {"waiting_for_image": True}
     await callback.answer()
 
@@ -1371,11 +1406,11 @@ async def on_photo_for_audio(message: Message, bot: Bot):
     if uid in wizard_state:
         pending_entry = _get_pending_audio_or_none(uid)
         if not pending_entry:
-            await message.reply(texts_module.MSG_AUDIO_EXPIRED)
+            await message.reply(tr("MSG_AUDIO_EXPIRED", uid))
             return
         photo = message.photo[-1]
         pending_entry["thumbnail_file_id"] = photo.file_id
-        await reply_with_premium_emoji(message, texts_module.MSG_IMAGE_RECEIVED)
+        await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
         await _wiz_advance_to_segment_or_finish(bot, uid, message, message.reply)
         return
 
@@ -1389,7 +1424,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         pending_entry = _get_pending_audio_or_none(uid)
         if not pending_entry:
             pending_images.pop(uid, None)
-            await message.reply(texts_module.MSG_AUDIO_EXPIRED)
+            await message.reply(tr("MSG_AUDIO_EXPIRED", uid))
             return
 
         pending_audio.pop(uid, None)
@@ -1400,7 +1435,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         job["uid"] = uid
         job["segment_start"] = 0.0
 
-        await reply_with_premium_emoji(message, texts_module.MSG_IMAGE_RECEIVED)
+        await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
         await _launch_job(bot, uid, job)
         return
 
@@ -1408,13 +1443,13 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         photo = message.photo[-1]
         pending_entry = pending_audio.get(message.from_user.id)
         if not pending_entry:
-            await message.reply(texts_module.MSG_NO_PENDING_AUDIO)
+            await message.reply(tr("MSG_NO_PENDING_AUDIO", uid))
             return
 
         if time.time() > pending_entry["expires_at"]:
             pending_audio.pop(message.from_user.id, None)
             pending_images.pop(message.from_user.id, None)
-            await message.reply(texts_module.MSG_AUDIO_EXPIRED)
+            await message.reply(tr("MSG_AUDIO_EXPIRED", uid))
             return
 
         pending_images[message.from_user.id] = {"photo_file_id": photo.file_id, "audio_message_id": pending.get("audio_message_id")}
@@ -1431,7 +1466,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         pending_images.pop(message.from_user.id, None)
 
         await start_job_worker(bot)
-        await reply_with_premium_emoji(message, texts_module.MSG_IMAGE_RECEIVED)
+        await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
         enqueue_job(job)
         return
 
