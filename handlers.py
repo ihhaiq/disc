@@ -10,6 +10,7 @@ import re
 from aiogram import Router, F, Bot
 from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import Command, CommandObject
 from aiogram.types import (
     Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
     LabeledPrice, PreCheckoutQuery, MessageEntity,
@@ -698,7 +699,12 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
 async def on_dev(message: Message):
     if not message.from_user or message.from_user.id != config.DEVELOPER_ID:
         return
-    await message.reply(texts_module.MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
+    await message.reply(
+        texts_module.MSG_DEV_CHOOSE_TEMPLATE
+        + "\n\n🔍 <code>/search كلمة</code> — للبحث بأسماء المتغيرات ومحتواها\n"
+        "✏️ <code>/edit VAR_NAME [ar|en]</code> — لتحرير متغيّر مباشرة بالاسم",
+        reply_markup=build_dev_keyboard(),
+    )
 
 
 def build_dev_keyboard() -> InlineKeyboardMarkup:
@@ -985,6 +991,22 @@ async def on_dev_text_page(callback, bot: Bot):
     await callback.answer()
 
 
+async def send_text_edit_prompt(message: Message, uid: int, var_name: str, lang: str, current_value: str) -> None:
+    """يجهّز جلسة تحرير نص (يخزّن الحالة بـ awaiting_text_value) ويرسل رسالة الطلب."""
+    awaiting_text_value[uid] = {"var_name": var_name, "lang": lang}
+    preview = current_value if len(current_value) <= 500 else current_value[:500] + "…"
+    escaped_preview = html.escape(preview)
+    lang_label = "English" if lang == "en" else "عربي"
+    await message.reply(
+        f"📝 القيمة الحالية لـ <code>{html.escape(var_name)}</code> ({lang_label}):\n\n<code>{escaped_preview}</code>\n\n"
+        "أرسل النص الجديد الآن ليحل محلها. لإيموجي بريميوم استخدم صيغة:\n"
+        "<code>&lt;tg-emoji emoji-id='123'&gt;😀&lt;/tg-emoji&gt;</code>\n"
+        "(بايدي رقمي صحيح ومحتوى fallback بالداخل) وسأتحقق منه قبل الحفظ.\n"
+        "التنسيقات مدعومة أيضًا: **عريض**، *مائل*، `كود`، ~~مشطوب~~، <<مسطر>>.\n"
+        "أو أرسل /cancel_edit للإلغاء."
+    )
+
+
 @router.callback_query(F.data.startswith("dev_text:edit:"))
 async def on_dev_text_edit(callback, bot: Bot):
     if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
@@ -996,17 +1018,112 @@ async def on_dev_text_edit(callback, bot: Bot):
         await callback.answer("⚠️ المتغيّر غير موجود", show_alert=True)
         return
 
-    awaiting_text_value[callback.from_user.id] = {"var_name": var_name, "lang": lang}
-    preview = current_value if len(current_value) <= 500 else current_value[:500] + "…"
-    escaped_preview = html.escape(preview)
-    await callback.message.reply(
-        f"📝 القيمة الحالية لـ <code>{var_name}</code>:\n\n<code>{escaped_preview}</code>\n\n"
-        "أرسل النص الجديد الآن ليحل محلها. لإيموجي بريميوم استخدم صيغة:\n"
-        "<code>&lt;tg-emoji emoji-id='123'&gt;😀&lt;/tg-emoji&gt;</code>\n"
-        "(بايدي رقمي صحيح ومحتوى fallback بالداخل) وسأتحقق منه قبل الحفظ.\n"
-        "أو أرسل /cancel_edit للإلغاء."
-    )
+    await send_text_edit_prompt(callback.message, callback.from_user.id, var_name, lang, current_value)
     await callback.answer()
+
+
+@router.message(Command("search"))
+async def on_dev_search(message: Message, command: CommandObject):
+    """
+    🔍 /search <كلمة البحث>
+    يبحث بأسماء المتغيرات ومحتواها (عربي + إنكليزي) ويرجّع النتائج مع معاينة النص.
+    """
+    if not message.from_user or message.from_user.id != config.DEVELOPER_ID:
+        return
+
+    query = (command.args or "").strip()
+    if not query:
+        await message.reply(
+            "استخدم الأمر هكذا:\n<code>/search كلمة البحث</code>\n\n"
+            "يبحث بأسماء المتغيرات والنصوص العربية والإنكليزية معًا."
+        )
+        return
+
+    query_lower = query.lower()
+    results: list[tuple[str, str, str]] = []  # (lang, var_name, value)
+
+    for name in get_editable_text_names("ar"):
+        value = getattr(texts_module, name, "") or ""
+        if query_lower in value.lower() or query_lower in name.lower():
+            results.append(("ar", name, value))
+
+    for name in get_editable_text_names("en"):
+        value = texts_module.TEXTS_EN.get(name, "") or ""
+        if query_lower in value.lower() or query_lower in name.lower():
+            results.append(("en", name, value))
+
+    if not results:
+        await message.reply(f"🔍 لا توجد نتائج لـ: <code>{html.escape(query)}</code>")
+        return
+
+    MAX_RESULTS_SHOWN = 15
+    lines = [f"🔍 نتائج البحث عن <code>{html.escape(query)}</code> — {len(results)} نتيجة:\n"]
+    for lang, name, value in results[:MAX_RESULTS_SHOWN]:
+        preview = value if len(value) <= 150 else value[:150] + "…"
+        preview_escaped = html.escape(preview)
+        lang_label = "EN" if lang == "en" else "AR"
+        lines.append(f"• <b>{html.escape(name)}</b> [{lang_label}]\n<code>{preview_escaped}</code>")
+
+    if len(results) > MAX_RESULTS_SHOWN:
+        lines.append(f"\n… و{len(results) - MAX_RESULTS_SHOWN} نتيجة إضافية، دقق البحث أكثر.")
+
+    lines.append(
+        "\n✏️ للتعديل المباشر استخدم:\n"
+        "<code>/edit VAR_NAME</code> (عربي افتراضيًا)\n"
+        "<code>/edit VAR_NAME en</code> (إنكليزي)"
+    )
+
+    await message.reply("\n\n".join(lines))
+
+
+@router.message(Command("edit"))
+async def on_dev_edit_command(message: Message, command: CommandObject):
+    """
+    ✏️ /edit VAR_NAME [ar|en]
+    يبدأ تحرير مباشر لمتغيّر معيّن بالاسم، بدون الحاجة يتصفح لوحة الأزرار.
+    """
+    if not message.from_user or message.from_user.id != config.DEVELOPER_ID:
+        return
+
+    args = (command.args or "").strip().split()
+    if not args:
+        await message.reply(
+            "استخدم الأمر هكذا:\n"
+            "<code>/edit VAR_NAME</code> (يحرر النسخة العربية افتراضيًا)\n"
+            "<code>/edit VAR_NAME en</code> (يحرر النسخة الإنكليزية)\n\n"
+            "استخدم /search للبحث عن اسم المتغيّر المناسب."
+        )
+        return
+
+    var_name = args[0]
+    lang = args[1].lower() if len(args) > 1 else None
+    uid = message.from_user.id
+
+    if lang not in (None, "ar", "en"):
+        await message.reply("⚠️ اللغة لازم تكون <code>ar</code> أو <code>en</code> فقط.")
+        return
+
+    if lang is None:
+        if hasattr(texts_module, var_name) and isinstance(getattr(texts_module, var_name), str):
+            lang = "ar"
+        elif var_name in texts_module.TEXTS_EN:
+            lang = "en"
+        else:
+            await message.reply(
+                f"⚠️ المتغيّر <code>{html.escape(var_name)}</code> غير موجود.\n"
+                "استخدم /search للبحث عن الاسم الصحيح."
+            )
+            return
+
+    current_value = get_editable_text_value(var_name, lang)
+    if current_value is None:
+        await message.reply(
+            f"⚠️ المتغيّر <code>{html.escape(var_name)}</code> غير موجود بلغة "
+            f"{'الإنكليزية' if lang == 'en' else 'العربية'}."
+        )
+        return
+
+    await send_text_edit_prompt(message, uid, var_name, lang, current_value)
 
 
 @router.callback_query(F.data == "dev_text:back")
