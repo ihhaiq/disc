@@ -582,11 +582,12 @@ async def process_job(bot: Bot, job: dict) -> None:
         await download_with_retries(bot, audio.file_id, audio_path, timeout_seconds=300, retries=3)
 
         thumbnail_file_id = None
-        if getattr(audio, "thumbnail", None) is not None:
-            thumbnail_file_id = audio.thumbnail.file_id
-        elif job.get("thumbnail_file_id"):
+        if job.get("thumbnail_file_id"):
+    # المستخدم رفع صورة يدويًا (بمعالج التخصيص أو الإنشاء السريع) — لها الأولوية دائمًا
             thumbnail_file_id = job["thumbnail_file_id"]
-
+        elif getattr(audio, "thumbnail", None) is not None:
+            thumbnail_file_id = audio.thumbnail.file_id
+        
         if thumbnail_file_id:
             animator.set_stage(tr("STAGE_DOWNLOADING_THUMBNAIL", uid))
             await download_with_retries(bot, thumbnail_file_id, thumb_path, timeout_seconds=60, retries=2)
