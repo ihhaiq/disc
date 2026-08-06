@@ -1415,11 +1415,9 @@ def build_wiz_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data="wiz_color:yellow", style="primary"),
             InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data="wiz_color:red", style="primary"),
         ],
-        [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary"),
-        [InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data="wiz_color:bloody", style="primary"),
-        ],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data="wiz_color:bloody", style="primary")],
     ])
-
 
 def build_wiz_speed_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
     labels = [
