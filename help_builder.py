@@ -70,6 +70,39 @@ def _root_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def _flatten_rich_text_value(value) -> str:
+    """
+    يحوّل أي شكل نص جزئي (str، أو list من runs/كائنات فرعية، أو None) إلى
+    string واحد. البلوكات الغنية أحيانًا ترجع 'text' كقائمة runs متنسقة
+    (كل run فيه .text خاص فيه) بدل نص خام مباشر، فنعالج الحالتين.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        parts = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, (list, tuple)):
+                parts.append(_flatten_rich_text_value(item))
+            else:
+                # كائن run/entity: جرب أشهر أسماء الحقول اللي ممكن تحمل النص
+                sub_text = (
+                    getattr(item, "text", None)
+                    or getattr(item, "content", None)
+                    or getattr(item, "html", None)
+                )
+                parts.append(_flatten_rich_text_value(sub_text))
+        return "".join(parts)
+    # كائن مفرد (run/entity) وليس نص ولا قائمة
+    sub_text = getattr(value, "text", None) or getattr(value, "content", None) or getattr(value, "html", None)
+    if sub_text is not None and sub_text is not value:
+        return _flatten_rich_text_value(sub_text)
+    return ""
+
+
 async def _extract_rich_html(message: Message) -> str | None:
     """
     يحاول يستخرج محتوى غني (HTML) من رسالة وصلت من المطور، بترتيب أولوية:
@@ -89,11 +122,13 @@ async def _extract_rich_html(message: Message) -> str | None:
             return html_val
         blocks = getattr(rich, "blocks", None)
         if blocks:
+            logger.debug("rich_message.blocks raw: %r", blocks)
             parts = []
             for block in blocks:
                 text_val = getattr(block, "text", None) or getattr(block, "html", None)
-                if text_val:
-                    parts.append(text_val)
+                flattened = _flatten_rich_text_value(text_val)
+                if flattened:
+                    parts.append(flattened)
             if parts:
                 return "".join(parts)
             logger.warning("وصلت رسالة غنية (rich_message.blocks) بدون نص قابل للاستخراج تلقائيًا")
