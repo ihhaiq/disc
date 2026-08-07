@@ -1361,15 +1361,18 @@ async def on_text_value_input(message: Message, bot: Bot):
     await message.reply(success_msg, reply_markup=build_dev_keyboard())
 
 
-@router.message(F.text == "/start")
-async def on_start(message: Message):
+@router.message(Command("start"))
+async def on_start(message: Message, command: CommandObject):
     uid = message.from_user.id if message.from_user else 0
+    
+    if command.args == "help":
+        pass 
+        
     await safe_reply(
         message,
         tr("MSG_START_HELP", uid),
         reply_markup=build_speed_keyboard(uid),
     )
-
 @router.callback_query(F.data == "vinyl_menu:open")
 async def on_vinyl_menu_open(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
