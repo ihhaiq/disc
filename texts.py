@@ -367,6 +367,7 @@ TEXTS_EN: dict[str, str] = {
     "BTN_VINYL_BLACK": "🖤 ",
     "BTN_VINYL_GREEN": "Green (beta)",
     "BTN_VINYL_BLOODY": "🩸",
+    "BTN_VINYL_ROSE" : "💮 ROSE"
     "BTN_BACK": "🔙 Back",
     "SPEED_LABEL_FULL": "Full turn",
     "SPEED_LABEL_8RPM": "8 RPM",
