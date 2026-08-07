@@ -1,23 +1,33 @@
 import logging
+
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+
 import config
 import help_storage
 import texts as texts_module
 from handlers import send_rich_message, safe_reply, tr, escape_rich_html
+
 logger = logging.getLogger(__name__)
 router = Router()
+
 # {developer_id}
 help_awaiting_text: set[int] = set()
 help_awaiting_button: set[int] = set()
+
+
 def _is_dev(uid: int) -> bool:
     return bool(uid) and uid == config.DEVELOPER_ID
+
+
 def _buttons_keyboard(buttons: list[dict]) -> InlineKeyboardMarkup | None:
     if not buttons:
         return None
     rows = [[InlineKeyboardButton(text=b["text"], url=b["url"])] for b in buttons]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _builder_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 نص الرسالة (Rich Msg)", callback_data="help_builder:settext")],
@@ -28,10 +38,14 @@ def _builder_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔙 رجوع", callback_data="help_builder:back"),
         ],
     ])
+
+
 def _root_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎛 تخصيص", callback_data="help_builder:menu")],
     ])
+
+
 def _model_to_data(obj):
     """يحوّل كائنات pydantic (اللي aiogram يبنيها منها) إلى dict/list عادي."""
     if hasattr(obj, "model_dump"):
