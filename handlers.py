@@ -349,8 +349,9 @@ def render_rich_status_html(
     - جدول فيه صف عنوان: نص ثابت (RICH_STATUS_HEADER_TEXT) + إيموجي بريميوم ثابت،
       لا يتغيّر مهما تغيّرت المرحلة
     - صف فيه سلسلة من نفس الإيموجي البريميوم: إيموجي جديد ينضاف لكل مرحلة،
-      وكل الإيموجيات (شاملة الحالي) تظهر مظلَّلة باستمرار، والإيموجي الأخير
-      تتحدّث النسبة المئوية بجانبه باستمرار مع تقدّم العملية لحين الاكتمال
+      وكل الإيموجيات (شاملة الحالي) تظهر مظلَّلة باستمرار، والنسبة المئوية تبدأ
+      من 0% عند ظهور أول إيموجي مضلل وتستمر بالارتفاع تزامنًا مع تقدّم العملية
+      وإضافة كل إيموجي جديد، لحين الاكتمال
     """
     header_emoji_html = f'<tg-emoji emoji-id="{HEADER_EMOJI_ID}">{HEADER_EMOJI_CHAR}</tg-emoji>'
     header = f'{header_emoji_html} {escape_rich_html(RICH_STATUS_HEADER_TEXT)}'
@@ -358,17 +359,15 @@ def render_rich_status_html(
     stage_icons = stage_icons or [STATUS_EMOJI_CHAR]
     emoji_html = f'<tg-emoji emoji-id="{STATUS_EMOJI_ID}">{STATUS_EMOJI_CHAR}</tg-emoji>'
 
+    percent = 0.0 if percent is None else max(0.0, min(100.0, percent))
+
     row_parts = []
     # الإيموجيات السابقة خلصت مراحلها ← تضل مظللة دايمًا
     for _ in stage_icons[:-1]:
         row_parts.append(f'<mark>{emoji_html}</mark>')
 
-    # الإيموجي الأخير (المضاف حديثًا): يتظلل باستمرار أيضًا، والرقم يرتفع جنبه لحين الاكتمال
-    if percent is not None:
-        percent = max(0.0, min(100.0, percent))
-        row_parts.append(f'<mark>{emoji_html}</mark> {int(percent)}%')
-    else:
-        row_parts.append(f'<mark>{emoji_html}</mark>')
+    # الإيموجي الأخير (المضاف حديثًا): يتظلل باستمرار، والنسبة جنبه تبدأ من 0% وترتفع
+    row_parts.append(f'<mark>{emoji_html}</mark> {int(percent)}%')
 
     icons_row = " ".join(row_parts)
 
@@ -387,7 +386,7 @@ class StatusAnimator:
         self.bot = bot
         self.user_id = user_id
         self.stage_text = texts_module.STAGE_PREPARING
-        self.percent: float | None = None
+        self.percent: float = 0.0
         self.stage_icons: list[str] = [STATUS_EMOJI_CHAR]
         self._last_stage_text: str | None = texts_module.STAGE_PREPARING
         self._last_rendered: str | None = None
@@ -401,7 +400,10 @@ class StatusAnimator:
             self.stage_icons.append(STATUS_EMOJI_CHAR)
             self._last_stage_text = stage_text
         self.stage_text = stage_text
-        self.percent = percent
+        # ما نصفّر النسبة بين المراحل اللي ما تمرر نسبة صريحة — تضل محتفظة بآخر قيمة
+        # وتستمر بالارتفاع بدل ما تختفي/ترجع None
+        if percent is not None:
+            self.percent = percent
 
     def _render_html(self) -> str:
         intro = tr("MSG_RICH_STATUS_INTRO", self.user_id)
@@ -656,7 +658,7 @@ async def process_job(bot: Bot, job: dict) -> None:
     job["temp_paths"] = [audio_path, thumb_path, disc_path, out_path]
 
     initial_html = render_rich_status_html(
-        None, tr("MSG_RICH_STATUS_INTRO", uid)
+        0.0, tr("MSG_RICH_STATUS_INTRO", uid)
     )
     status = await send_rich_message(bot, message.chat.id, initial_html, reply_to_message_id=message.message_id)
     animator = StatusAnimator(status, bot, uid)
