@@ -142,6 +142,7 @@ async def _extract_rich_content(message: Message) -> tuple[str | None, list | No
 
 
 @router.message(Command("help"))
+@router.message(Command("start", magic=F.args == "help"))
 async def on_help(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
 
