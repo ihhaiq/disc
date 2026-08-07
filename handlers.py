@@ -611,6 +611,8 @@ def get_developer_vinyl_path(user_id: int) -> str:
         return config.VINYL_GREEN_PATH
     if choice == "bloody" :
         return config.VINYL_BLOODY_PATH
+    if choice == "rose" :
+        return config.VINYL_ROSE_PATH
     return config.VINYL_PATH
 
 
@@ -628,6 +630,8 @@ def get_developer_shadow_path(user_id: int) -> str:
         return config.SHADOW_GREEN_PATH
     if choice == "bloody":
         return config.SHADOW_PINK_PATH
+    if choice == "rose" :
+        return config.SHADOW_ROSE_PATH
     return config.SHADOW_PATH
 
 
