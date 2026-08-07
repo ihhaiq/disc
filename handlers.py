@@ -1343,7 +1343,7 @@ async def on_text_value_input(message: Message, bot: Bot):
     await message.reply(success_msg, reply_markup=build_dev_keyboard())
 
 
-@router.message(F.text.in_({"/start", "/help"}))
+@router.message(F.text == "/start")
 async def on_start(message: Message):
     uid = message.from_user.id if message.from_user else 0
     await safe_reply(
