@@ -26,6 +26,7 @@ from texts import clean_html, text_to_bold, text_to_italic, text_to_code, text_t
 import custom_texts
 import math
 from texts import BTN_VINYL_BLOODY
+BTN_VINYL_ROSE
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -805,6 +806,7 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=label("BTN_VINYL_GREEN", "green"), callback_data="vinyl:green", style=btn_style("green")),
             InlineKeyboardButton(text=label("BTN_VINYL_BLOODY", "bloody"), callback_data="vinyl:bloody", style=btn_style("bloody")),
         ],
+        [InlineKeyboardButton(text=label(texts_module.BTN_VINYL_ROSE, "rose"), callback_data="vinyl:rose")],
         [InlineKeyboardButton(text=tr("BTN_BACK", user_id), callback_data="vinyl_menu:back")],
 
     ])
@@ -1525,8 +1527,11 @@ def build_wiz_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data="wiz_color:yellow", style="primary"),
             InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data="wiz_color:red", style="primary"),
         ],
-        [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary")],
-        [InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data="wiz_color:bloody", style="primary")],
+        [
+            InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data="wiz_color:bloody", style="primary")
+        ],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_ROSE", user_id), callback_data="wiz_color:rose", style="primary")],
     ])
 
 
@@ -1569,7 +1574,7 @@ async def on_wiz_color(callback, bot: Bot):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     choice = callback.data.split(":", 1)[1]
-    if choice in ("black","green","pink", "blue", "yellow", "red","bloody"):
+    if choice in ("black","green","pink", "blue", "yellow", "red","bloody", "rose"):
         developer_vinyl_choice[uid] = choice
     else:
         developer_vinyl_choice.pop(uid, None)
@@ -1749,7 +1754,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
 async def on_vinyl_choice(callback, bot: Bot):
     choice = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id if callback.from_user else 0
-    if choice in ("pink", "blue", "yellow", "red", "green","bloody"):
+    if choice in ("pink", "blue", "yellow", "red", "green","bloody", "rose"):
         developer_vinyl_choice[user_id] = choice
     else:
         developer_vinyl_choice.pop(user_id, None)
