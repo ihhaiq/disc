@@ -25,7 +25,7 @@ import texts as texts_module
 from texts import clean_html, text_to_bold, text_to_italic, text_to_code, text_to_underline, text_to_strikethrough
 import custom_texts
 import math
-from texts import BTN_VINYL_BLOODY , BTN_VINYL_ROSE
+from texts import BTN_VINYL_BLOODY
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -611,8 +611,6 @@ def get_developer_vinyl_path(user_id: int) -> str:
         return config.VINYL_GREEN_PATH
     if choice == "bloody" :
         return config.VINYL_BLOODY_PATH
-    if choice == "rose" :
-        return config.VINYL_ROSE_PATH
     return config.VINYL_PATH
 
 
@@ -630,8 +628,6 @@ def get_developer_shadow_path(user_id: int) -> str:
         return config.SHADOW_GREEN_PATH
     if choice == "bloody":
         return config.SHADOW_PINK_PATH
-    if choice == "rose" :
-        return config.SHADOW_ROSE_PATH
     return config.SHADOW_PATH
 
 
@@ -805,7 +801,6 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=label("BTN_VINYL_GREEN", "green"), callback_data="vinyl:green", style=btn_style("green")),
             InlineKeyboardButton(text=label("BTN_VINYL_BLOODY", "bloody"), callback_data="vinyl:bloody", style=btn_style("bloody")),
         ],
-        [InlineKeyboardButton(text=label(.BTN_VINYL_ROSE, "rose"), callback_data="vinyl:rose", style=btn_style("rose"))],
         [InlineKeyboardButton(text=tr("BTN_BACK", user_id), callback_data="vinyl_menu:back")],
 
     ])
@@ -1366,7 +1361,7 @@ async def on_text_value_input(message: Message, bot: Bot):
     await message.reply(success_msg, reply_markup=build_dev_keyboard())
 
 
-@router.message(Command("start"))
+@router.message(F.text == "/start")
 async def on_start(message: Message):
     uid = message.from_user.id if message.from_user else 0
     await safe_reply(
@@ -1374,6 +1369,7 @@ async def on_start(message: Message):
         tr("MSG_START_HELP", uid),
         reply_markup=build_speed_keyboard(uid),
     )
+
 @router.callback_query(F.data == "vinyl_menu:open")
 async def on_vinyl_menu_open(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
@@ -1526,11 +1522,8 @@ def build_wiz_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data="wiz_color:yellow", style="primary"),
             InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data="wiz_color:red", style="primary"),
         ],
-        [
-            InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary"),
-            InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data="wiz_color:bloody", style="primary")
-        ],
-        [InlineKeyboardButton(text=tr("BTN_VINYL_ROSE", user_id), callback_data="wiz_color:rose", style="primary")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data="wiz_color:bloody", style="primary")],
     ])
 
 
@@ -1573,7 +1566,7 @@ async def on_wiz_color(callback, bot: Bot):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     choice = callback.data.split(":", 1)[1]
-    if choice in ("black","green","pink", "blue", "yellow", "red","bloody", "rose"):
+    if choice in ("black","green","pink", "blue", "yellow", "red","bloody"):
         developer_vinyl_choice[uid] = choice
     else:
         developer_vinyl_choice.pop(uid, None)
@@ -1753,7 +1746,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
 async def on_vinyl_choice(callback, bot: Bot):
     choice = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id if callback.from_user else 0
-    if choice in ("pink", "blue", "yellow", "red", "green","bloody", "rose"):
+    if choice in ("pink", "blue", "yellow", "red", "green","bloody"):
         developer_vinyl_choice[user_id] = choice
     else:
         developer_vinyl_choice.pop(user_id, None)
