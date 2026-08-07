@@ -1362,12 +1362,8 @@ async def on_text_value_input(message: Message, bot: Bot):
 
 
 @router.message(Command("start"))
-async def on_start(message: Message, command: CommandObject):
+async def on_start(message: Message):
     uid = message.from_user.id if message.from_user else 0
-    
-    if command.args == "help":
-        pass 
-        
     await safe_reply(
         message,
         tr("MSG_START_HELP", uid),
