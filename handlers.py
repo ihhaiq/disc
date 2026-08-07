@@ -286,14 +286,26 @@ def escape_rich_html(text: str) -> str:
     )
 
 
-async def send_rich_message(bot: Bot, chat_id: int, html_content: str,
+async def send_rich_message(bot: Bot, chat_id: int, html_content: str | None = None,
+                             blocks: list | None = None,
                              reply_to_message_id: int | None = None,
                              reply_markup: InlineKeyboardMarkup | None = None) -> Message:
+    """
+    يرسل Rich Message. يدعم مصدرين للمحتوى:
+    - blocks: البنية الخام كما وصلتنا من تليكرام (rich_message.blocks) — تُرسَل
+      كما هي بدون أي تحويل، للحفاظ على الجدول/العناوين/الإيموجي البريميوم/
+      الفيديوهات المضمّنة بالضبط كما أنشأها المطور بمحرر تليكرام.
+    - html_content: نص HTML جاهز (يُستخدم فقط لو ما فيه blocks).
+    """
     reply_params = ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
     try:
+        if blocks:
+            rich_message = InputRichMessage(blocks=blocks)
+        else:
+            rich_message = InputRichMessage(html=html_content or "")
         return await bot.send_rich_message(
             chat_id=chat_id,
-            rich_message=InputRichMessage(html=html_content),
+            rich_message=rich_message,
             reply_parameters=reply_params,
             reply_markup=reply_markup,
         )
@@ -302,18 +314,24 @@ async def send_rich_message(bot: Bot, chat_id: int, html_content: str,
     except Exception:
         logger.exception("فشل إرسال Rich Message، الرجوع لرسالة عادية")
 
-    # ⚠️ html_content مبني بوسوم خاصة بـ Rich Message فقط (<p>, <table>, <mark> ...)
-    # وهذي غير مدعومة بـ sendMessage العادي (parse_mode=HTML يدعم فقط b/i/u/s/code/pre/a/tg-spoiler/tg-emoji)
+    # ⚠️ لا نملك تمثيل HTML موثوق لـ blocks، ولو عندنا html_content فهو مبني
+    # بوسوم خاصة بـ Rich Message فقط (<p>, <table>, <mark> ...) وغير مدعومة
+    # بـ sendMessage العادي (parse_mode=HTML يدعم فقط b/i/u/s/code/pre/a/tg-spoiler/tg-emoji)
     # فنحوّلها لنص خام مقروء بدل ما نرسلها كما هي ونطيح بخطأ can't parse entities
-    plain_fallback = re.sub(r"<[^>]+>", " ", html_content)
-    plain_fallback = html.unescape(re.sub(r"\s+", " ", plain_fallback)).strip()
+    if html_content:
+        plain_fallback = re.sub(r"<[^>]+>", " ", html_content)
+        plain_fallback = html.unescape(re.sub(r"\s+", " ", plain_fallback)).strip()
+    else:
+        plain_fallback = "⚠️ تعذّر عرض هذا المحتوى الغني بهالنسخة الحالية."
     return await bot.send_message(chat_id=chat_id, text=plain_fallback, reply_markup=reply_markup)
 
 
-async def reply_rich(message: Message, bot: Bot, html_content: str,
+async def reply_rich(message: Message, bot: Bot, html_content: str | None = None,
+                      blocks: list | None = None,
                       reply_markup: InlineKeyboardMarkup | None = None) -> Message:
     return await send_rich_message(
-        bot, message.chat.id, html_content,
+        bot, message.chat.id,
+        html_content=html_content, blocks=blocks,
         reply_to_message_id=message.message_id,
         reply_markup=reply_markup,
     )
