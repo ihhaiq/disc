@@ -1,57 +1,23 @@
-# -*- coding: utf-8 -*-
-"""
-أمر /help كرسالة غنية (Rich Message) قابلة للتخصيص من لوحة المطور.
-
-سير العمل:
-1) المطور يرسل /help  → تظهر مسودة الرسالة الحالية (نص "النص" افتراضيًا)
-   مع زر "🎛 تخصيص".
-2) ضغط "تخصيص" → قائمة "اختر من ادناه" فيها 3 أزرار:
-   • "📝 نص الرسالة (Rich Msg)"  → يطلب من المطور يرسل نص/رسالة غنية جديدة
-     (يدعم استقبال رسالة أُنشئت من محرر تليكرام للرسائل الغنية مباشرة —
-     Bot API 10.2، تحديث 14 يوليو 2026 — وإلا نص/HTML عادي كبديل).
-   • "➕ اضف زر"  → يطلب "نص الزر | الرابط" ليضيف زر URL على الرسالة.
-   • "👁 معاينة"  → يرسل نسخة تجريبية مطابقة تمامًا لما سيراه المستخدمون.
-   وفيها كمان "💾 حفظ ونشر" و"🔙 رجوع".
-3) عادي المستخدمين اللي يرسلون /help ياخذون آخر نسخة "منشورة" فقط،
-   ولو ما فيه نسخة منشورة بعد يرجعون لنص المساعدة الافتراضي (MSG_START_HELP).
-
-ملاحظة عن استقبال الرسائل الغنية من محرر تليكرام:
-Bot API (تحديث 14 يوليو 2026) عرّف بنية InputRichMessage.blocks للإرسال، وأي
-رسالة يبنيها المستخدم بمحرر تليكرام الغني وترسل للبوت تصل كرسالة فيها حقل
-غني (rich content) بدل نص/HTML عادي. حتى نتعامل مع أي شكل توصل فيه aiogram
-(rich_message ككائن، أو html جاهز، أو نص خام)، نحاول أكثر من مسار قراءة بالتتابع
-وننزل لأبسط بديل متوفر بدل ما نطيح بخطأ.
-"""
 import logging
-
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-
 import config
 import help_storage
 import texts as texts_module
 from handlers import send_rich_message, safe_reply, tr, escape_rich_html
-
 logger = logging.getLogger(__name__)
 router = Router()
-
 # {developer_id}
 help_awaiting_text: set[int] = set()
 help_awaiting_button: set[int] = set()
-
-
 def _is_dev(uid: int) -> bool:
     return bool(uid) and uid == config.DEVELOPER_ID
-
-
 def _buttons_keyboard(buttons: list[dict]) -> InlineKeyboardMarkup | None:
     if not buttons:
         return None
     rows = [[InlineKeyboardButton(text=b["text"], url=b["url"])] for b in buttons]
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 def _builder_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 نص الرسالة (Rich Msg)", callback_data="help_builder:settext")],
@@ -62,45 +28,48 @@ def _builder_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔙 رجوع", callback_data="help_builder:back"),
         ],
     ])
-
-
 def _root_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎛 تخصيص", callback_data="help_builder:menu")],
     ])
+def _model_to_data(obj):
+    """يحوّل كائنات pydantic (اللي aiogram يبنيها منها) إلى dict/list عادي."""
+    if hasattr(obj, "model_dump"):
+        try:
+            return obj.model_dump()
+        except Exception:
+            pass
+    return obj
 
 
-def _flatten_rich_text_value(value) -> str:
+def _walk_collect_text(value, out: list[str]) -> None:
     """
-    يحوّل أي شكل نص جزئي (str، أو list من runs/كائنات فرعية، أو None) إلى
-    string واحد. البلوكات الغنية أحيانًا ترجع 'text' كقائمة runs متنسقة
-    (كل run فيه .text خاص فيه) بدل نص خام مباشر، فنعالج الحالتين.
+    يمشي بأي بنية بيانات (pydantic model / dict / list / str) ويجمع كل
+    الأجزاء النصية اللي يلقاها بالداخل، بغض النظر عن اسم الحقل أو نوع
+    البلوك (فقرة، جدول، toggle/details، وسائط...). هذا يضمن ما نفوّت أي
+    نص موجود بأي مكان بالبنية، حتى لو ما نعرف اسم الحقل بالضبط.
     """
+    value = _model_to_data(value)
     if value is None:
-        return ""
+        return
     if isinstance(value, str):
-        return value
-    if isinstance(value, (list, tuple)):
-        parts = []
+        s = value.strip()
+        if s:
+            out.append(s)
+        return
+    if isinstance(value, dict):
+        for v in value.values():
+            _walk_collect_text(v, out)
+        return
+    if isinstance(value, (list, tuple, set)):
         for item in value:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, (list, tuple)):
-                parts.append(_flatten_rich_text_value(item))
-            else:
-                # كائن run/entity: جرب أشهر أسماء الحقول اللي ممكن تحمل النص
-                sub_text = (
-                    getattr(item, "text", None)
-                    or getattr(item, "content", None)
-                    or getattr(item, "html", None)
-                )
-                parts.append(_flatten_rich_text_value(sub_text))
-        return "".join(parts)
-    # كائن مفرد (run/entity) وليس نص ولا قائمة
-    sub_text = getattr(value, "text", None) or getattr(value, "content", None) or getattr(value, "html", None)
-    if sub_text is not None and sub_text is not value:
-        return _flatten_rich_text_value(sub_text)
-    return ""
+            _walk_collect_text(item, out)
+        return
+    # كائن ما نعرف نوعه (مو pydantic ولا dict ولا list) — جرب __dict__ كحل أخير
+    d = getattr(value, "__dict__", None)
+    if d:
+        for v in d.values():
+            _walk_collect_text(v, out)
 
 
 async def _extract_rich_html(message: Message) -> str | None:
@@ -122,15 +91,25 @@ async def _extract_rich_html(message: Message) -> str | None:
             return html_val
         blocks = getattr(rich, "blocks", None)
         if blocks:
-            logger.debug("rich_message.blocks raw: %r", blocks)
-            parts = []
+            # 🔎 لوق دائم (INFO) للبنية الخام — انسخه وارسله لي لو النتيجة
+            # النهائية ناقصة أي جزء، حتى أدقق الاستخراج على شكل بياناتك بالضبط.
+            try:
+                raw_dump = [
+                    (b.model_dump() if hasattr(b, "model_dump") else repr(b))
+                    for b in blocks
+                ]
+            except Exception:
+                raw_dump = [repr(b) for b in blocks]
+            logger.info("rich_message.blocks raw dump: %r", raw_dump)
+
+            block_lines: list[str] = []
             for block in blocks:
-                text_val = getattr(block, "text", None) or getattr(block, "html", None)
-                flattened = _flatten_rich_text_value(text_val)
-                if flattened:
-                    parts.append(flattened)
-            if parts:
-                return "".join(parts)
+                collected: list[str] = []
+                _walk_collect_text(block, collected)
+                if collected:
+                    block_lines.append(" ".join(collected))
+            if block_lines:
+                return "\n".join(block_lines)
             logger.warning("وصلت رسالة غنية (rich_message.blocks) بدون نص قابل للاستخراج تلقائيًا")
 
     html_text = getattr(message, "html_text", None)
