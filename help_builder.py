@@ -1,33 +1,23 @@
 import logging
-
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-
 import config
 import help_storage
 import texts as texts_module
 from handlers import send_rich_message, safe_reply, tr, escape_rich_html
-
 logger = logging.getLogger(__name__)
 router = Router()
-
 # {developer_id}
 help_awaiting_text: set[int] = set()
 help_awaiting_button: set[int] = set()
-
-
 def _is_dev(uid: int) -> bool:
     return bool(uid) and uid == config.DEVELOPER_ID
-
-
 def _buttons_keyboard(buttons: list[dict]) -> InlineKeyboardMarkup | None:
     if not buttons:
         return None
     rows = [[InlineKeyboardButton(text=b["text"], url=b["url"])] for b in buttons]
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 def _builder_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 نص الرسالة (Rich Msg)", callback_data="help_builder:settext")],
@@ -38,14 +28,10 @@ def _builder_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔙 رجوع", callback_data="help_builder:back"),
         ],
     ])
-
-
 def _root_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎛 تخصيص", callback_data="help_builder:menu")],
     ])
-
-
 def _model_to_data(obj):
     """يحوّل كائنات pydantic (اللي aiogram يبنيها منها) إلى dict/list عادي."""
     if hasattr(obj, "model_dump"):
@@ -54,6 +40,46 @@ def _model_to_data(obj):
         except Exception:
             pass
     return obj
+# أنواع الوسائط اللي عند إعادة إرسالها كـ blocks تحتاج تحويل من صيغة الإخراج
+# (Output: file_id/file_unique_id/width/height/...) إلى صيغة الإدخال
+# (Input: حقل واحد اسمه "media" يحمل الـ file_id). لو ما حوّلناها، pydantic
+# يرفض InputRichMessage بخطأ "media Field required".
+_MEDIA_BLOCK_TYPES = ("video", "photo", "animation", "audio", "document")
+def _normalize_media_dict(media: dict) -> dict:
+    """
+    يحوّل كائن وسائط بصيغة Output (فيه file_id + بيانات وصفية) إلى صيغة
+    Input المطلوبة لإعادة الإرسال: {"media": file_id, ...باقي الحقول
+    المسموحة زي has_spoiler لو موجودة}.
+    """
+    if not isinstance(media, dict):
+        return media
+    if "media" in media:
+        # already input-shaped
+        return media
+    file_id = media.get("file_id")
+    if not file_id:
+        return media
+    return {"media": file_id}
+
+
+def _normalize_blocks_for_input(value):
+    """
+    يمشي بأي بنية (dict/list) ويطبّع كل بلوك وسائط (video/photo/animation/
+    audio/document) من صيغة الإخراج (اللي وصلتنا من تليكرام) إلى صيغة
+    الإدخال المطلوبة لإرسالها من جديد عبر InputRichMessage. باقي الحقول
+    (النصوص، الجداول، details، custom_emoji...) تبقى كما هي بدون تغيير.
+    """
+    if isinstance(value, dict):
+        new_dict = {}
+        for k, v in value.items():
+            if k in _MEDIA_BLOCK_TYPES and isinstance(v, dict):
+                new_dict[k] = _normalize_media_dict(v)
+            else:
+                new_dict[k] = _normalize_blocks_for_input(v)
+        return new_dict
+    if isinstance(value, list):
+        return [_normalize_blocks_for_input(item) for item in value]
+    return value
 
 
 async def _extract_rich_content(message: Message) -> tuple[str | None, list | None]:
@@ -96,9 +122,11 @@ async def _extract_rich_content(message: Message) -> tuple[str | None, list | No
             if raw_dump:
                 logger.info("rich_message.blocks raw dump: %r", raw_dump)
                 # ⚠️ لا نفكّك البنية إلى نص مسطّح ولا نحوّلها لـ HTML يدويًا —
-                # هذا كان سبب كسر التنسيق. نعيد إرسال نفس raw_dump كما هو
-                # عبر InputRichMessage(blocks=raw_dump) لاحقًا.
-                return None, raw_dump
+                # هذا كان سبب كسر التنسيق. لكن نطبّع بلوكات الوسائط (فيديو/
+                # صورة/...) من صيغة الإخراج إلى صيغة الإدخال (media بدل
+                # file_id) حتى تقبلها InputRichMessage عند إعادة الإرسال.
+                normalized = _normalize_blocks_for_input(raw_dump)
+                return None, normalized
             logger.warning("وصلت رسالة غنية (rich_message.blocks) بدون بنية قابلة للاستخراج")
 
     html_text = getattr(message, "html_text", None)
