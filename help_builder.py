@@ -50,92 +50,67 @@ def _model_to_data(obj):
     """يحوّل كائنات pydantic (اللي aiogram يبنيها منها) إلى dict/list عادي."""
     if hasattr(obj, "model_dump"):
         try:
-            return obj.model_dump()
+            return obj.model_dump(exclude_none=True)
         except Exception:
             pass
     return obj
 
 
-def _walk_collect_text(value, out: list[str]) -> None:
+async def _extract_rich_content(message: Message) -> tuple[str | None, list | None]:
     """
-    يمشي بأي بنية بيانات (pydantic model / dict / list / str) ويجمع كل
-    الأجزاء النصية اللي يلقاها بالداخل، بغض النظر عن اسم الحقل أو نوع
-    البلوك (فقرة، جدول، toggle/details، وسائط...). هذا يضمن ما نفوّت أي
-    نص موجود بأي مكان بالبنية، حتى لو ما نعرف اسم الحقل بالضبط.
-    """
-    value = _model_to_data(value)
-    if value is None:
-        return
-    if isinstance(value, str):
-        s = value.strip()
-        if s:
-            out.append(s)
-        return
-    if isinstance(value, dict):
-        for v in value.values():
-            _walk_collect_text(v, out)
-        return
-    if isinstance(value, (list, tuple, set)):
-        for item in value:
-            _walk_collect_text(item, out)
-        return
-    # كائن ما نعرف نوعه (مو pydantic ولا dict ولا list) — جرب __dict__ كحل أخير
-    d = getattr(value, "__dict__", None)
-    if d:
-        for v in d.values():
-            _walk_collect_text(v, out)
-
-
-async def _extract_rich_html(message: Message) -> str | None:
-    """
-    يحاول يستخرج محتوى غني (HTML) من رسالة وصلت من المطور، بترتيب أولوية:
+    يحاول يستخرج محتوى غني من رسالة وصلت من المطور، بترتيب أولوية:
     1) message.rich_message.html — لو aiogram/Bot API عرضوا الرسالة كـ Rich
-       Message جاهزة (هذا الشكل المتوقع لرسالة أُنشئت بمحرر تليكرام الغني).
-    2) message.rich_message.blocks — نص تقريبي مبني من البلوكات لو ما فيه html
-       جاهز (fallback بسيط: دمج نص كل بلوك).
+       Message جاهزة بصيغة html مباشرة.
+       يرجّع (html, None)
+    2) message.rich_message.blocks — البنية الخام (Blocks) كما وصلتنا من
+       تليكرام، بدون أي تفكيك أو تحويل لنص. نعيد إرسال نفس البنية لاحقًا
+       عبر InputRichMessage(blocks=...) عشان نحافظ على الجدول/العناوين/
+       الإيموجي البريميوم/الفيديوهات المضمّنة كما هي بالضبط.
+       يرجّع (None, raw_blocks)
     3) message.html_text (من aiogram) — تحويل تنسيقات تليكرام العادية (بولد/
        مائل/روابط...) إلى HTML.
-    4) message.text/caption كنص خام.
-    يرجّع None لو ما فيه أي محتوى نصي بالمرة.
+       يرجّع (html, None)
+    4) message.text/caption كنص خام (يُهرَّب كـ HTML).
+       يرجّع (html, None)
+    يرجّع (None, None) لو ما فيه أي محتوى نصي بالمرة.
     """
     rich = getattr(message, "rich_message", None)
     if rich is not None:
         html_val = getattr(rich, "html", None)
         if html_val:
-            return html_val
+            return html_val, None
+
         blocks = getattr(rich, "blocks", None)
         if blocks:
             # 🔎 لوق دائم (INFO) للبنية الخام — انسخه وارسله لي لو النتيجة
             # النهائية ناقصة أي جزء، حتى أدقق الاستخراج على شكل بياناتك بالضبط.
             try:
                 raw_dump = [
-                    (b.model_dump() if hasattr(b, "model_dump") else repr(b))
+                    (b.model_dump(exclude_none=True) if hasattr(b, "model_dump") else b)
                     for b in blocks
                 ]
             except Exception:
-                raw_dump = [repr(b) for b in blocks]
-            logger.info("rich_message.blocks raw dump: %r", raw_dump)
+                logger.exception("فشل تفريغ rich_message.blocks")
+                raw_dump = None
 
-            block_lines: list[str] = []
-            for block in blocks:
-                collected: list[str] = []
-                _walk_collect_text(block, collected)
-                if collected:
-                    block_lines.append(" ".join(collected))
-            if block_lines:
-                return "\n".join(block_lines)
-            logger.warning("وصلت رسالة غنية (rich_message.blocks) بدون نص قابل للاستخراج تلقائيًا")
+            if raw_dump:
+                logger.info("rich_message.blocks raw dump: %r", raw_dump)
+                # ⚠️ لا نفكّك البنية إلى نص مسطّح ولا نحوّلها لـ HTML يدويًا —
+                # هذا كان سبب كسر التنسيق. نعيد إرسال نفس raw_dump كما هو
+                # عبر InputRichMessage(blocks=raw_dump) لاحقًا.
+                return None, raw_dump
+            logger.warning("وصلت رسالة غنية (rich_message.blocks) بدون بنية قابلة للاستخراج")
 
     html_text = getattr(message, "html_text", None)
     if html_text:
-        return html_text
+        return html_text, None
 
     if message.text:
-        return escape_rich_html(message.text)
+        return escape_rich_html(message.text), None
     if message.caption:
-        return escape_rich_html(message.caption)
+        return escape_rich_html(message.caption), None
 
-    return None
+    return None, None
 
 
 @router.message(Command("help"))
@@ -146,7 +121,9 @@ async def on_help(message: Message, bot: Bot):
         published = help_storage.get_published()
         if published:
             await send_rich_message(
-                bot, message.chat.id, published["html"],
+                bot, message.chat.id,
+                html_content=published.get("html"),
+                blocks=published.get("blocks"),
                 reply_to_message_id=message.message_id,
                 reply_markup=_buttons_keyboard(published.get("buttons", [])),
             )
@@ -158,7 +135,9 @@ async def on_help(message: Message, bot: Bot):
     help_awaiting_button.discard(uid)
     draft = help_storage.get_draft(uid)
     await send_rich_message(
-        bot, message.chat.id, draft["html"],
+        bot, message.chat.id,
+        html_content=draft.get("html"),
+        blocks=draft.get("blocks"),
         reply_to_message_id=message.message_id,
         reply_markup=_root_keyboard(),
     )
@@ -214,7 +193,9 @@ async def on_help_preview(callback, bot: Bot):
         return
     draft = help_storage.get_draft(uid)
     await send_rich_message(
-        bot, callback.message.chat.id, draft["html"],
+        bot, callback.message.chat.id,
+        html_content=draft.get("html"),
+        blocks=draft.get("blocks"),
         reply_markup=_buttons_keyboard(draft.get("buttons", [])),
     )
     await callback.answer("👁 هذي المعاينة النهائية مثل ما راح يشوفها المستخدمين")
@@ -244,7 +225,9 @@ async def on_help_back(callback, bot: Bot):
     help_awaiting_button.discard(uid)
     draft = help_storage.get_draft(uid)
     await send_rich_message(
-        bot, callback.message.chat.id, draft["html"],
+        bot, callback.message.chat.id,
+        html_content=draft.get("html"),
+        blocks=draft.get("blocks"),
         reply_markup=_root_keyboard(),
     )
     await callback.answer()
@@ -267,8 +250,8 @@ async def on_help_text_input(message: Message, bot: Bot):
     uid = message.from_user.id
     help_awaiting_text.discard(uid)
 
-    extracted = await _extract_rich_html(message)
-    if not extracted:
+    extracted_html, extracted_blocks = await _extract_rich_content(message)
+    if not extracted_html and not extracted_blocks:
         help_awaiting_text.add(uid)
         await message.reply(
             "❌ ما قدرت أستخرج أي نص من الرسالة اللي وصلتني. جرب ترسلها كنص "
@@ -277,7 +260,8 @@ async def on_help_text_input(message: Message, bot: Bot):
         return
 
     draft = help_storage.get_draft(uid)
-    draft["html"] = extracted
+    draft["html"] = extracted_html
+    draft["blocks"] = extracted_blocks
     help_storage.save_draft(uid, draft)
 
     await message.reply("✅ تم تحديث نص المسودة.", reply_markup=_builder_menu_keyboard())
