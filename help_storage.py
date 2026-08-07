@@ -1,13 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-تخزين دائم لرسالة /help الغنية (Rich Message) اللي يبنيها المطور:
-- النص (HTML الخاص بالـ Rich Message)
-- الأزرار (قائمة أزرار url فقط، لأن أزرار الـ Rich Message المرفقة برسالة عادية
-  تكون InlineKeyboardButton عادية)
 
-نفس فلسفة custom_texts.py: يُحفظ بملف JSON داخل DATA_DIR (المربوط بـ Railway
-Volume) حتى يبقى بعد الـ Restart/Redeploy.
-"""
 import json
 import logging
 import os
@@ -43,12 +34,17 @@ def _write_raw(data: dict) -> None:
 def get_draft(uid: int) -> dict:
     """
     مسودة المطور الحالية (قبل الحفظ/النشر النهائي).
-    شكلها: {"html": str, "buttons": [{"text": str, "url": str}]}
+    شكلها: {"html": str | None, "blocks": list | None, "buttons": [{"text": str, "url": str}]}
+    - لو "blocks" موجودة (غير None) ← هذا المصدر الأساسي، ويُرسَل كما هو.
+    - لو "blocks" فاضية ← نستخدم "html" كبديل.
     """
     data = _read_raw()
     draft = data.get("draft", {}).get(str(uid))
     if draft is None:
-        draft = {"html": _DEFAULT_HTML, "buttons": []}
+        draft = {"html": _DEFAULT_HTML, "blocks": None, "buttons": []}
+    draft.setdefault("blocks", None)
+    draft.setdefault("html", _DEFAULT_HTML)
+    draft.setdefault("buttons", [])
     return draft
 
 
@@ -64,13 +60,17 @@ def get_published() -> dict | None:
     None لو المطور ما نشر شي بعد (نرجع للنص الافتراضي القديم MSG_START_HELP).
     """
     data = _read_raw()
-    return data.get("published")
+    published = data.get("published")
+    if published is not None:
+        published.setdefault("blocks", None)
+    return published
 
 
 def publish(uid: int, draft: dict, editor_name: str = "") -> None:
     data = _read_raw()
     data["published"] = {
         "html": draft.get("html", _DEFAULT_HTML),
+        "blocks": draft.get("blocks"),
         "buttons": draft.get("buttons", []),
         "editor_id": uid,
         "editor_name": editor_name,
