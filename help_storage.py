@@ -27,8 +27,13 @@ def _read_raw() -> dict:
 
 def _write_raw(data: dict) -> None:
     os.makedirs(os.path.dirname(HELP_MESSAGE_FILE_PATH), exist_ok=True)
-    with open(HELP_MESSAGE_FILE_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    tmp_path = HELP_MESSAGE_FILE_PATH + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, HELP_MESSAGE_FILE_PATH)
+    except Exception:
+        logger.exception("فشل حفظ ملف help_message.json")
 
 
 def get_draft(uid: int) -> dict:
