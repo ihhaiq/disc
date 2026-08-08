@@ -17,7 +17,7 @@ from aiogram.types import (
     InputRichMessage, ReplyParameters,
 )
 
-from compose import build_disc
+from compose import build_disc, build_disc_framed
 from processor import get_duration, render_vinyl
 import config
 import limits
@@ -1075,10 +1075,26 @@ async def process_job(bot: Bot, job: dict) -> None:
         # هذه الدالة تُستدعى بمعامل سادس إضافي (get_developer_frame_path) غير
         # موجود بتوقيع build_disc إطلاقًا، فكان هذا يفشّل كل عملية بناء قرص
         # بخطأ TypeError. الآن الاستدعاء مطابق تمامًا لتوقيع compose.build_disc.
-        await asyncio.to_thread(
-            build_disc, thumb_path, get_developer_vinyl_path(uid, job.get("vinyl_choice")), disc_path,
-            config.HOLE_RATIO, config.DISC_SIZE,
-        )
+        #
+        # 🆕 "الإطار الكلاسيكي" (frame_classic) قالب مختلف عن باقي الألوان: ما
+        # عنده ملف vinyl_*.png (حلقة/ذراع فقط بدون أخاديد قرص)، فنبني القرص عبر
+        # build_disc_framed (خلفية غامقة + صورة الغلاف تغطي كامل فتحة الإطار)
+        # ثم نستخدم frame_classic.png نفسه كطبقة ثابتة (نفس دور shadow.png
+        # العادي) بدل get_developer_shadow_path — القرص يدور تحته والإطار يبقى
+        # ثابت فوقه، تمامًا مثل أي shadow آخر بـ processor.py.
+        vinyl_choice = job.get("vinyl_choice")
+        if vinyl_choice == "frame_classic":
+            await asyncio.to_thread(
+                build_disc_framed, thumb_path, disc_path,
+                config.DISC_SIZE, config.FRAME_CLASSIC_LABEL_RATIO, config.FRAME_CLASSIC_DISC_RATIO,
+            )
+            render_shadow_path = config.FRAME_CLASSIC_PATH
+        else:
+            await asyncio.to_thread(
+                build_disc, thumb_path, get_developer_vinyl_path(uid, vinyl_choice), disc_path,
+                config.HOLE_RATIO, config.DISC_SIZE,
+            )
+            render_shadow_path = get_developer_shadow_path(uid, vinyl_choice)
 
         animator.set_stage(tr("STAGE_RENDERING_VIDEO", uid), percent=0)
 
@@ -1086,7 +1102,7 @@ async def process_job(bot: Bot, job: dict) -> None:
             animator.set_stage(tr("STAGE_RENDERING_VIDEO", uid), percent=percent)
 
         await render_vinyl(
-            disc_path, get_developer_shadow_path(uid, job.get("vinyl_choice")), audio_path, out_path,
+            disc_path, render_shadow_path, audio_path, out_path,
             rotation_seconds=job.get("rotation_seconds", get_user_rotation_seconds(uid)),
             size=config.DISC_SIZE, fps=config.OUTPUT_FPS,
             max_duration=config.MAX_DURATION_SECONDS,
@@ -2258,6 +2274,13 @@ def build_wiz_color_keyboard(
                 style="primary"
             )
         ],
+        [
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_FRAME_CLASSIC", user_id),
+                callback_data=cb("wiz_color:frame_classic"),
+                style="primary"
+            )
+        ],
     ])
 
 
@@ -2322,7 +2345,7 @@ async def on_wiz_color(callback, bot: Bot):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     choice = base.split(":", 1)[1]
-    if choice in ("black", "green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald"):
+    if choice in ("black", "green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "frame_classic"):
         developer_vinyl_choice[uid] = choice
     else:
         developer_vinyl_choice.pop(uid, None)
