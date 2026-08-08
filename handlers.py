@@ -1091,14 +1091,23 @@ async def process_job(bot: Bot, job: dict) -> None:
         # ثم نضيف الإطار كطبقة ثابتة في processor.py.
         render_frame_path = None
         if frame_choice == "silver":
-            await asyncio.to_thread(
-                resize_disc_for_frame,
-                disc_path,
-                disc_path,
-                config.FRAME_SILVER_DISC_RATIO,
-                config.DISC_SIZE,
-            )
-            render_frame_path = config.FRAME_SILVER_PATH
+    await asyncio.to_thread(
+        resize_disc_for_frame,
+        disc_path,
+        disc_path,
+        config.FRAME_SILVER_DISC_RATIO,
+        config.DISC_SIZE,
+    )
+
+    await asyncio.to_thread(
+        resize_disc_for_frame,
+        render_shadow_path,
+        render_shadow_path,
+        config.FRAME_SILVER_DISC_RATIO,
+        config.DISC_SIZE,
+    )
+
+    render_frame_path = config.FRAME_SILVER_PATH
 
         animator.set_stage(tr("STAGE_RENDERING_VIDEO", uid), percent=0)
 
