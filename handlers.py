@@ -1184,7 +1184,8 @@ async def process_job(bot: Bot, job: dict) -> None:
                 pass
 
 
-def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
+def build_customize_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """قائمة التخصيص التي تُفتح من زر (تخصيص) في رسالة الترحيب."""
     current = get_user_rotation_seconds(user_id)
     labels = [
         (tr("SPEED_LABEL_FULL", user_id), "full"),
@@ -1194,23 +1195,52 @@ def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
     ]
     buttons = []
     for label, value in labels:
-        if value == "full":
-            selected = current in (None, 0)
-        else:
-            selected = current == (60 / float(value))
+        selected = current in (None, 0) if value == "full" else current == (60 / float(value))
         mark = " ✅" if selected else ""
         buttons.append(InlineKeyboardButton(
             text=f"{label}{mark}",
             callback_data=f"speed:{value}",
             style="primary",
         ))
-    buttons.append(InlineKeyboardButton(
-        text=tr("BTN_VINYL_COLOR_MENU", user_id),
-        callback_data="vinyl_menu:open",
-        style="danger",
-    ))
-    buttons.append(build_lang_button())
-    return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:4], [buttons[4], buttons[5]]])
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        buttons[:2],
+        buttons[2:4],
+        [InlineKeyboardButton(
+            text=tr("BTN_VINYL_COLOR_MENU", user_id),
+            callback_data="vinyl_menu:open",
+            style="danger",
+        )],
+        [InlineKeyboardButton(
+            text=tr("BTN_BACK", user_id),
+            callback_data="customize:back",
+            style="primary",
+        )],
+    ])
+
+
+def build_start_keyboard(user_id: int, bot_username: str) -> InlineKeyboardMarkup:
+    """لوحة الترحيب: إضافة البوت، اللغة، والتخصيص."""
+    add_url = f"https://t.me/{bot_username}?startgroup=start"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="➕ أضفني للمجموعة",
+            url=add_url,
+            style="primary",
+        )],
+        [
+            InlineKeyboardButton(
+                text=texts_module.BTN_LANG,
+                callback_data="lang:toggle",
+                style="success",
+            ),
+            InlineKeyboardButton(
+                text=tr("BTN_CUSTOMIZE", user_id),
+                callback_data="customize:open",
+                style="danger",
+            ),
+        ],
+    ])
 
 
 def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
@@ -1852,13 +1882,40 @@ async def on_text_value_input(message: Message, bot: Bot):
 
 
 @router.message(Command("start"), F.chat.type == "private")
-async def on_start(message: Message):
+async def on_start(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
+    me = await bot.get_me()
     await safe_reply(
         message,
         tr("MSG_START_HELP", uid),
-        reply_markup=build_speed_keyboard(uid),
+        reply_markup=build_start_keyboard(uid, me.username),
     )
+@router.callback_query(F.data == "customize:open")
+async def on_customize_open(callback, bot: Bot):
+    user_id = callback.from_user.id if callback.from_user else 0
+    text = (
+        "⚙️ Customize your disc settings:"
+        if get_user_lang(user_id) == "en"
+        else "⚙️ تخصيص إعدادات القرص:"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=build_customize_keyboard(user_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "customize:back")
+async def on_customize_back(callback, bot: Bot):
+    user_id = callback.from_user.id if callback.from_user else 0
+    me = await bot.get_me()
+    await callback.message.edit_text(
+        tr("MSG_START_HELP", user_id),
+        reply_markup=build_start_keyboard(user_id, me.username),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "vinyl_menu:open")
 async def on_vinyl_menu_open(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
@@ -1879,9 +1936,9 @@ async def on_vinyl_menu_back(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
     if developer_menu_image_file_id:
         await callback.message.delete()
-        await callback.message.answer(tr("MSG_START_HELP", user_id), reply_markup=build_speed_keyboard(user_id))
+        await callback.message.answer(tr("MSG_START_HELP", user_id), reply_markup=build_customize_keyboard(user_id))
     else:
-        await callback.message.edit_text(tr("MSG_START_HELP", user_id), reply_markup=build_speed_keyboard(user_id))
+        await callback.message.edit_text("⚙️ تخصيص إعدادات القرص:", reply_markup=build_customize_keyboard(user_id))
     await callback.answer()
 
 
@@ -1897,16 +1954,26 @@ async def on_lang_toggle(callback, bot: Bot):
         btn.callback_data and btn.callback_data.startswith("vinyl:")
         for row in current_markup.inline_keyboard for btn in row
     ))
+    is_customize_menu = bool(current_markup and any(
+        btn.callback_data and (btn.callback_data.startswith("speed:") or btn.callback_data == "vinyl_menu:open")
+        for row in current_markup.inline_keyboard for btn in row
+    ))
     try:
         if is_color_menu:
             await callback.message.edit_text(
                 tr("MSG_VINYL_COLOR_INFO", user_id),
                 reply_markup=build_vinyl_color_keyboard(user_id),
             )
+        elif is_customize_menu:
+            await callback.message.edit_text(
+                "⚙️ تخصيص إعدادات القرص:" if get_user_lang(user_id) == "ar" else "⚙️ Customize your disc settings:",
+                reply_markup=build_customize_keyboard(user_id),
+            )
         else:
+            me = await bot.get_me()
             await callback.message.edit_text(
                 tr("MSG_START_HELP", user_id),
-                reply_markup=build_speed_keyboard(user_id),
+                reply_markup=build_start_keyboard(user_id, me.username),
             )
     except TelegramBadRequest:
         pass
@@ -2569,7 +2636,7 @@ async def on_speed_selected(callback, bot: Bot):
         user_rotation_seconds[user_id] = 0.0
     else:
         user_rotation_seconds[user_id] = 60 / float(data)
-    await callback.message.edit_reply_markup(reply_markup=build_speed_keyboard(user_id))
+    await callback.message.edit_reply_markup(reply_markup=build_customize_keyboard(user_id))
     await callback.answer(tr("MSG_SPEED_SAVED_ANSWER", user_id))
 
 
