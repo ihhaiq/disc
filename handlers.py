@@ -83,6 +83,10 @@ awaiting_text_value: dict[int, dict] = {}  # {"var_name": str, "lang": "ar"|"en"
 HOURGLASS_FRAMES = ["⏳", "⌛"]
 PROGRESS_BAR_WIDTH = 12
 STATUS_UPDATE_INTERVAL_SECONDS = 2.2
+# أقصى وقت مسموح لأي Job واحد (تنزيل + بناء + رندر + رفع). لو تجاوزه (مثلاً
+# بسبب ملف صوتي تالف يعلّق ffmpeg/ffprobe للأبد)، نلغيه ونكمل للي بعده بدل
+# ما يعلّق الـ worker بالكامل ويوقف كل الطابور من ورائه.
+JOB_TIMEOUT_SECONDS = 8 * 60
 
 
 # ============================================================
@@ -552,7 +556,13 @@ async def start_job_worker(bot: Bot) -> None:
                     continue
 
                 tracked_jobs[job_id] = job
-                await process_job(bot, job)
+                try:
+                    await asyncio.wait_for(process_job(bot, job), timeout=JOB_TIMEOUT_SECONDS)
+                except asyncio.TimeoutError:
+                    # process_job نفسها تكون قد أرسلت رسالة توضيحية للمستخدم
+                    # ونظّفت ملفاتها المؤقتة (عبر معالجة CancelledError بداخلها
+                    # + finally). هنا بس نكمل للطلب التالي بدل ما نوقف الطابور.
+                    logger.warning(texts_module.LOG_JOB_TIMEOUT)
             except Exception:
                 logger.exception(texts_module.LOG_QUEUE_PROCESS_FAILED)
             finally:
@@ -635,6 +645,17 @@ def get_developer_shadow_path(user_id: int) -> str:
     return config.SHADOW_PATH
 
 
+def get_developer_frame_path(user_id: int) -> str | None:
+    """
+    مسار طبقة "إطار" إضافية تُلصق فوق صورة الغلاف داخل ثقب القرص.
+    None يعني بدون إطار (الوضع الافتراضي لكل الألوان ما عدا ROSE حاليًا).
+    """
+    choice = developer_vinyl_choice.get(user_id)
+    if choice == "rose":
+        return config.FRAME_ROSE_PATH
+    return None
+
+
 def get_job_priority(user_id: int) -> int:
     return 0 if user_id and user_id == config.DEVELOPER_ID else 1
 
@@ -713,6 +734,7 @@ async def process_job(bot: Bot, job: dict) -> None:
         await asyncio.to_thread(
             build_disc, thumb_path, get_developer_vinyl_path(uid), disc_path,
             config.HOLE_RATIO, config.DISC_SIZE,
+            get_developer_frame_path(uid),
         )
 
         animator.set_stage(tr("STAGE_RENDERING_VIDEO", uid), percent=0)
@@ -734,6 +756,21 @@ async def process_job(bot: Bot, job: dict) -> None:
         animator.set_stage(tr("STAGE_UPLOADING_VIDEO", uid), percent=100)
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
         await message.reply_video_note(FSInputFile(out_path), length=config.DISC_SIZE)
+    except asyncio.CancelledError:
+        # يصير هذا تحديدًا لو process_job أُلغيت من الخارج بسبب تجاوز
+        # JOB_TIMEOUT_SECONDS (انظر _worker أدناه). لازم نمسكها بشكل صريح
+        # لأن CancelledError لا يرثها Exception بايثون 3.8+، ولو تركناها
+        # تنتشر بدون التقاطها هنا فالتنظيف بالأسفل (finally) يصير طبيعي،
+        # لكن نبي كمان نبلّغ المستخدم برسالة واضحة بدل ما تختفي المهمة بصمت.
+        logger.warning(texts_module.LOG_JOB_TIMEOUT)
+        try:
+            await reply_with_premium_emoji(
+                message,
+                texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=JOB_TIMEOUT_SECONDS / 60),
+            )
+        except Exception:
+            logger.exception(texts_module.LOG_SEND_ERROR_FAILED)
+        raise
     except Exception as e:
         logger.exception(texts_module.LOG_PROCESS_JOB_FAILED)
         error_text = str(e) or repr(e) or e.__class__.__name__
