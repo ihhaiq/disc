@@ -864,7 +864,7 @@ async def process_job(bot: Bot, job: dict) -> None:
         if _is_channel_context(uid):
             final_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(
-                    text=f"{CHANNEL_RESULT_EMOJI} MAKE WITH LoVe",
+                    text=f"{CHANNEL_RESULT_EMOJI} make with love",
                     url=CHANNEL_RESULT_URL,
                     style="danger",
                 )
@@ -1754,7 +1754,11 @@ async def on_mode_custom(callback, bot: Bot):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     wizard_state[uid] = {}
-    await callback.message.edit_text(tr("MSG_WIZ_CHOOSE_COLOR", uid), reply_markup=build_wiz_color_keyboard(uid))
+    ch_chat, ch_msg = _channel_ctx(uid)
+    await callback.message.edit_text(
+        tr("MSG_WIZ_CHOOSE_COLOR", uid),
+        reply_markup=build_wiz_color_keyboard(uid, ch_chat, ch_msg),
+    )
     await callback.answer()
 
 
