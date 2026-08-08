@@ -25,7 +25,7 @@ import texts as texts_module
 from texts import clean_html, text_to_bold, text_to_italic, text_to_code, text_to_underline, text_to_strikethrough
 import custom_texts
 import math
-from texts import BTN_VINYL_BLOODY , BTN_VINYL_ROSE
+from texts import BTN_VINYL_BLOODY , BTN_VINYL_ROSE , BTN_VINYL_EMERALD
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -243,8 +243,9 @@ CHANNEL_RESULT_EMOJI = "💌"
 # ============================================================
 # دعم إيموجي بريميوم (Telegram Premium Custom Emoji)
 # ============================================================
-PREMIUM_EMOJI_IDS: dict[str, str] = {}
-
+PREMIUM_EMOJI_IDS = {
+    "emerald": "5285265490350972397",
+}
 USE_PREMIUM_EMOJI = bool(PREMIUM_EMOJI_IDS)
 
 
@@ -774,6 +775,8 @@ def get_developer_vinyl_path(user_id: int) -> str:
         return config.VINYL_BLOODY_PATH
     if choice == "rose" :
         return config.VINYL_ROSE_PATH
+    if choice == "emerald" :
+        return == config.VINYL_EMERALD_PATH
     return config.VINYL_PATH
 
 
@@ -792,6 +795,8 @@ def get_developer_shadow_path(user_id: int) -> str:
     if choice == "bloody":
         return config.SHADOW_PINK_PATH
     if choice == "rose" :
+        return config.SHADOW_ROSE_PATH
+    if choice == "emerald" :
         return config.SHADOW_ROSE_PATH
     return config.SHADOW_PATH
 
@@ -1020,23 +1025,71 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
         return "success" if is_selected else "primary"
 
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=label("BTN_VINYL_BLACK", "default"), callback_data="vinyl:default", style=btn_style("default"))],
-        [
-            InlineKeyboardButton(text=label("BTN_VINYL_PINK", "pink"), callback_data="vinyl:pink", style=btn_style("pink")),
-            InlineKeyboardButton(text=label("BTN_VINYL_BLUE", "blue"), callback_data="vinyl:blue", style=btn_style("blue")),
-        ],
-        [
-            InlineKeyboardButton(text=label("BTN_VINYL_YELLOW", "yellow"), callback_data="vinyl:yellow", style=btn_style("yellow")),
-            InlineKeyboardButton(text=label("BTN_VINYL_RED", "red"), callback_data="vinyl:red", style=btn_style("red")),
-        ],
-        [
-            InlineKeyboardButton(text=label("BTN_VINYL_GREEN", "green"), callback_data="vinyl:green", style=btn_style("green")),
-            InlineKeyboardButton(text=label("BTN_VINYL_BLOODY", "bloody"), callback_data="vinyl:bloody", style=btn_style("bloody")),
-        ],
-        [InlineKeyboardButton(text=label("BTN_VINYL_ROSE", "rose"), callback_data="vinyl:rose", style=btn_style("rose"))],
-        [InlineKeyboardButton(text=tr("BTN_BACK", user_id), callback_data="vinyl_menu:back")],
-
-    ])
+    [
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_BLACK", "default"),
+            callback_data="vinyl:default",
+            style=btn_style("default")
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_PINK", "pink"),
+            callback_data="vinyl:pink",
+            style=btn_style("pink")
+        ),
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_BLUE", "blue"),
+            callback_data="vinyl:blue",
+            style=btn_style("blue")
+        ),
+    ],
+    [
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_YELLOW", "yellow"),
+            callback_data="vinyl:yellow",
+            style=btn_style("yellow")
+        ),
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_RED", "red"),
+            callback_data="vinyl:red",
+            style=btn_style("red")
+        ),
+    ],
+    [
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_GREEN", "green"),
+            callback_data="vinyl:green",
+            style=btn_style("green")
+        ),
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_BLOODY", "bloody"),
+            callback_data="vinyl:bloody",
+            style=btn_style("bloody")
+        ),
+    ],
+    [
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_ROSE", "rose"),
+            callback_data="vinyl:rose",
+            style=btn_style("rose")
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_EMERALD", "Emerald"),
+            callback_data="vinyl:emerald",
+            style="primary",
+            icon_custom_emoji_id=PREMIUM_EMOJI_IDS["emerald"],
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            text=tr("BTN_BACK", user_id),
+            callback_data="vinyl_menu:back"
+        )
+    ],
+])
 
 
 @router.message(F.text == "/dev")
@@ -1832,26 +1885,78 @@ def _channel_ctx(uid) -> tuple[int | None, int | None]:
         return None, None
 
 
-def build_wiz_color_keyboard(user_id: int = 0, channel_chat_id: int | None = None,
-                              channel_message_id: int | None = None) -> InlineKeyboardMarkup:
+def build_wiz_color_keyboard(
+    user_id: int = 0,
+    channel_chat_id: int | None = None,
+    channel_message_id: int | None = None
+) -> InlineKeyboardMarkup:
+
     def cb(data: str) -> str:
-        return _with_channel_suffix(data, channel_chat_id, channel_message_id)
+        return _with_channel_suffix(
+            data,
+            channel_chat_id,
+            channel_message_id
+        )
 
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=tr("BTN_VINYL_BLACK", user_id), callback_data=cb("wiz_color:default"), style="primary")],
         [
-            InlineKeyboardButton(text=tr("BTN_VINYL_PINK", user_id), callback_data=cb("wiz_color:pink"), style="primary"),
-            InlineKeyboardButton(text=tr("BTN_VINYL_BLUE", user_id), callback_data=cb("wiz_color:blue"), style="primary"),
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_BLACK", user_id),
+                callback_data=cb("wiz_color:default"),
+                style="primary"
+            )
         ],
         [
-            InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data=cb("wiz_color:yellow"), style="primary"),
-            InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data=cb("wiz_color:red"), style="primary"),
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_PINK", user_id),
+                callback_data=cb("wiz_color:pink"),
+                style="primary"
+            ),
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_BLUE", user_id),
+                callback_data=cb("wiz_color:blue"),
+                style="primary"
+            ),
         ],
         [
-            InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data=cb("wiz_color:green"), style="primary"),
-            InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data=cb("wiz_color:bloody"), style="primary")
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_YELLOW", user_id),
+                callback_data=cb("wiz_color:yellow"),
+                style="primary"
+            ),
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_RED", user_id),
+                callback_data=cb("wiz_color:red"),
+                style="primary"
+            ),
         ],
-        [InlineKeyboardButton(text=tr("BTN_VINYL_ROSE", user_id), callback_data=cb("wiz_color:rose"), style="primary")],
+        [
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_GREEN", user_id),
+                callback_data=cb("wiz_color:green"),
+                style="primary"
+            ),
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_BLOODY", user_id),
+                callback_data=cb("wiz_color:bloody"),
+                style="primary"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_EMERALD", user_id),
+                callback_data=cb("wiz_color:emerald"),
+                style="primary",
+                icon_custom_emoji_id=PREMIUM_EMOJI_IDS["emerald"],
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=tr("BTN_VINYL_ROSE", user_id),
+                callback_data=cb("wiz_color:rose"),
+                style="primary"
+            )
+        ],
     ])
 
 
@@ -1916,7 +2021,7 @@ async def on_wiz_color(callback, bot: Bot):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     choice = base.split(":", 1)[1]
-    if choice in ("black", "green", "pink", "blue", "yellow", "red", "bloody", "rose"):
+    if choice in ("black", "green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald"):
         developer_vinyl_choice[uid] = choice
     else:
         developer_vinyl_choice.pop(uid, None)
@@ -2170,7 +2275,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
 async def on_vinyl_choice(callback, bot: Bot):
     choice = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id if callback.from_user else 0
-    if choice in ("pink", "blue", "yellow", "red", "green","bloody", "rose"):
+    if choice in ("pink", "blue", "yellow", "red", "green","bloody", "rose", "emerald"):
         developer_vinyl_choice[user_id] = choice
     else:
         developer_vinyl_choice.pop(user_id, None)
