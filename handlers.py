@@ -88,6 +88,117 @@ STATUS_UPDATE_INTERVAL_SECONDS = 2.2
 # ما يعلّق الـ worker بالكامل ويوقف كل الطابور من ورائه.
 JOB_TIMEOUT_SECONDS = 8 * 60
 
+# ============================================================
+# دعم القنوات (Channels) — إنشاء القرص من منشور صوتي بقناة
+# ============================================================
+# كل الـ dictionaries أعلاه (pending_audio, wizard_state, developer_vinyl_choice,
+# user_rotation_seconds, tracked_jobs, user_pending_jobs...) مفتاحها "uid" عادة
+# int لمستخدم بالخاص. بسياق القناة نستخدم كمفتاح نص مركّب فريد بدل uid حقيقي
+# (chat_id + message_id الملف الصوتي الأصلي)، فما فيه أي تصادم ممكن مع uid حقيقي
+# int، وبنفس الوقت نعيد استخدام كل الدوال الموجودة (tr, build_wiz_*, get_developer_*)
+# بدون أي تكرار كود — هذا هو سبب "التماسك" المطلوب.
+CHANNEL_KEY_PREFIX = "c"
+
+
+def _channel_key(chat_id: int, message_id: int) -> str:
+    return f"{CHANNEL_KEY_PREFIX}{chat_id}:{message_id}"
+
+
+def _is_channel_context(uid) -> bool:
+    return isinstance(uid, str) and uid.startswith(CHANNEL_KEY_PREFIX)
+
+
+def _with_channel_suffix(callback_data: str, channel_chat_id: int | None, channel_message_id: int | None) -> str:
+    """يضيف لاحقة chat_id:message_id لأي callback_data لو الكيبورد يُبنى لسياق قناة."""
+    if channel_chat_id is None or channel_message_id is None:
+        return callback_data
+    return f"{callback_data}:{channel_chat_id}:{channel_message_id}"
+
+
+def _split_channel_suffix(data: str) -> tuple[str, int | None, int | None]:
+    """
+    يفحص آخر جزئين من callback_data: لو كلاهما أرقام صحيحة (والأول ممكن يبدأ
+    بإشارة سالبة، لأن آيدي القنوات بتليكرام سالب دايمًا)، يعتبرهم سياق قناة
+    (chat_id, message_id) ويرجع باقي النص بدونهم. غير هذا يرجع النص الأصلي
+    كامل بدون تغيير (سياق خاص عادي).
+    """
+    parts = data.split(":")
+    if len(parts) >= 3:
+        maybe_chat, maybe_msg = parts[-2], parts[-1]
+        if maybe_chat.lstrip("-").isdigit() and maybe_msg.isdigit():
+            base = ":".join(parts[:-2])
+            return base, int(maybe_chat), int(maybe_msg)
+    return data, None, None
+
+
+async def _is_channel_controller(bot: Bot, chat_id: int, user_id: int) -> bool:
+    """يتحقق إن المستخدم أدمن أو مالك بالقناة (chat_id)."""
+    if not user_id:
+        return False
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        return member.status in ("administrator", "creator")
+    except Exception:
+        return False
+
+
+async def resolve_callback_uid(callback, bot: Bot) -> tuple[str, int | None, int | None] | None:
+    """
+    يحلل callback.data ويرجع (base_data, uid, channel_chat_id) حيث uid ممكن يكون
+    int (زر بالخاص) أو str مركّب (زر بسياق قناة). يرجع None ويرد على callback
+    برسالة رفض تلقائيًا لو الضاغط مو أدمن بالقناة.
+    """
+    base, ch_chat, ch_msg = _split_channel_suffix(callback.data)
+    if ch_chat is not None:
+        presser_id = callback.from_user.id if callback.from_user else 0
+        if not await _is_channel_controller(bot, ch_chat, presser_id):
+            await callback.answer(texts_module.MSG_CHANNEL_ADMIN_ONLY, show_alert=True)
+            return None
+        return base, _channel_key(ch_chat, ch_msg), ch_chat
+    return base, (callback.from_user.id if callback.from_user else 0), None
+
+
+async def notify_missing_channel_permission(bot: Bot, chat_id: int, chat_title: str, reason: str) -> None:
+    """
+    لو البوت ينقصه صلاحية بالقناة (نشر/حذف رسائل)، نحاول نبلّغ مالك القناة أو
+    أي أدمن (بالخاص) بالترتيب: المالك أولاً، وإلا أول أدمن نقدر نوصله. لو فشلت
+    كل المحاولات (مثلاً محد منهم بدأ محادثة خاصة مع البوت من قبل، وتليكرام
+    يمنع البوت من ابتداء محادثة)، نحاول كحل أخير نطبع تحذير داخل القناة نفسها.
+    """
+    text = (
+        f"⚠️ البوت ينقصه صلاحية داخل القناة «{chat_title}»:\n{reason}\n\n"
+        "رجاءً امنح البوت الصلاحية المطلوبة من إعدادات إدارة القناة، وبعدها "
+        "بيشتغل تلقائيًا بدون أي خطوة إضافية."
+    )
+    try:
+        admins = await bot.get_chat_administrators(chat_id)
+    except Exception:
+        logger.exception("فشل جلب قائمة أدمن القناة لإشعارهم بنقص الصلاحيات")
+        admins = []
+
+    admins_sorted = sorted(admins, key=lambda m: 0 if m.status == "creator" else 1)
+    for admin in admins_sorted:
+        if admin.user.is_bot:
+            continue
+        try:
+            await bot.send_message(admin.user.id, text)
+            return
+        except Exception:
+            continue
+
+    try:
+        await bot.send_message(chat_id, text)
+    except Exception:
+        logger.exception("تعذّر إشعار أي طرف بنقص الصلاحيات بالقناة %s", chat_id)
+
+
+# فهرس يربط (chat_id, message_id لرسالة البوت اللي تطلب صورة) بمفتاح السياق
+# المركّب، عشان لو الأدمن يرد على رسالة البوت هذي بصورة، نعرف لأي طلب تخص.
+channel_reply_index: dict[tuple[int, int], str] = {}
+
+CHANNEL_RESULT_URL = "http://t.me/discbybot?start=help"
+CHANNEL_RESULT_EMOJI = "💌"
+
 
 # ============================================================
 # دعم إيموجي بريميوم (Telegram Premium Custom Emoji)
@@ -755,7 +866,41 @@ async def process_job(bot: Bot, job: dict) -> None:
 
         animator.set_stage(tr("STAGE_UPLOADING_VIDEO", uid), percent=100)
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
-        await message.reply_video_note(FSInputFile(out_path), length=config.DISC_SIZE)
+
+        final_keyboard = None
+        if _is_channel_context(uid):
+            final_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(
+                    text=f"{CHANNEL_RESULT_EMOJI} كيف اسوي وحدة مثل هذي؟",
+                    url=CHANNEL_RESULT_URL,
+                    style="danger",
+                )
+            ]])
+
+        try:
+            await message.reply_video_note(FSInputFile(out_path), length=config.DISC_SIZE, reply_markup=final_keyboard)
+        except TelegramBadRequest as e:
+            if _is_channel_context(uid) and ("rights" in str(e).lower() or "administrator" in str(e).lower()):
+                await notify_missing_channel_permission(
+                    bot, message.chat.id, message.chat.title or "القناة",
+                    "نشر فيديو/رسائل بالقناة (صلاحية Post Messages).",
+                )
+                return
+            raise
+
+        # تنظيف رسائل البوت الوسيطة (اختيار الوضع + خطوات الـ Wizard) بسياق
+        # القناة فقط — ما نلمس منشور الصوت الأصلي للمستخدم إطلاقًا.
+        if _is_channel_context(uid):
+            for msg_id in job.get("channel_msg_ids", []):
+                try:
+                    await bot.delete_message(message.chat.id, msg_id)
+                except Exception:
+                    pass
+            ch_chat, _ch_msg = _channel_ctx(uid)
+            if ch_chat is not None:
+                for reply_key, mapped in list(channel_reply_index.items()):
+                    if mapped == uid:
+                        channel_reply_index.pop(reply_key, None)
     except asyncio.CancelledError:
         # يصير هذا تحديدًا لو process_job أُلغيت من الخارج بسبب تجاوز
         # JOB_TIMEOUT_SECONDS (انظر _worker أدناه). لازم نمسكها بشكل صريح
@@ -1464,6 +1609,63 @@ async def on_lang_toggle(callback, bot: Bot):
         pass
     await callback.answer("✅ EN" if new_lang == "en" else "✅ AR")
 
+@router.channel_post(F.audio)
+async def on_channel_audio(message: Message, bot: Bot):
+    """
+    نفس فكرة on_audio بالضبط، لكن للمنشورات الصوتية داخل القنوات. ما فيه أي
+    فحص limits/whitelist هنا (تلك الحدود خاصة بالاستخدام الشخصي بالخاص)،
+    لأن التحكم بالخطوات محصور أصلاً على أدمن القناة عبر resolve_callback_uid.
+    """
+    chat_id = message.chat.id
+    key = _channel_key(chat_id, message.message_id)
+    audio = message.audio
+
+    pending_audio[key] = {
+        "audio": audio,
+        "message": message,
+        "expires_at": time.time() + WIZARD_TTL_SECONDS,
+        "job_id": uuid.uuid4().hex,
+        "uid": key,
+        "channel_msg_ids": [],
+    }
+    wizard_state.pop(key, None)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=tr("BTN_QUICK_CREATE", key),
+            callback_data=_with_channel_suffix("mode:quick", chat_id, message.message_id),
+        )],
+        [InlineKeyboardButton(
+            text=tr("BTN_CUSTOMIZE", key),
+            callback_data=_with_channel_suffix("mode:custom", chat_id, message.message_id),
+        )],
+        [InlineKeyboardButton(
+            text=tr("BTN_CANCEL", key),
+            callback_data=_with_channel_suffix("cancel_queue", chat_id, message.message_id),
+        )],
+    ])
+
+    try:
+        prompt = await message.reply(tr("MSG_CHOOSE_MODE", key), reply_markup=keyboard)
+    except TelegramBadRequest as e:
+        pending_audio.pop(key, None)
+        if "rights" in str(e).lower() or "administrator" in str(e).lower():
+            await notify_missing_channel_permission(
+                bot, chat_id, message.chat.title or "القناة",
+                "إرسال الرسائل وأزرار Inline بالقناة (صلاحية Post Messages).",
+            )
+        else:
+            logger.exception("فشل إرسال رسالة اختيار الوضع بالقناة")
+        return
+
+    # نسجّل رسالة "اختيار الوضع" بفهرس الردود لأنها هي نفسها اللي ستُستخدم/تُعدَّل
+    # طول مسار الـ Wizard (لون → سرعة → صورة → مقطع)، فتسجيلها مرة وحدة يكفي
+    # حتى لو انتقلنا لخطوة تطلب صورة لاحقًا (رد على نفس الرسالة).
+    channel_reply_index[(chat_id, prompt.message_id)] = key
+    pending_audio[key]["channel_msg_ids"].append(prompt.message_id)
+    pending_audio[key]["channel_prompt_message_id"] = prompt.message_id
+
+
 @router.message(F.audio)
 async def on_audio(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
@@ -1519,9 +1721,12 @@ async def _launch_job(bot: Bot, uid: int, job: dict) -> None:
     enqueue_job(job)
 
 
-@router.callback_query(F.data == "mode:quick")
+@router.callback_query(F.data.startswith("mode:quick"))
 async def on_mode_quick(callback, bot: Bot):
-    uid = callback.from_user.id if callback.from_user else 0
+    resolved = await resolve_callback_uid(callback, bot)
+    if resolved is None:
+        return
+    _, uid, channel_chat_id = resolved
     pending = _get_pending_audio_or_none(uid)
     if not pending:
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
@@ -1534,15 +1739,23 @@ async def on_mode_quick(callback, bot: Bot):
         job["segment_start"] = 0.0
         await edit_text_with_premium_emoji(callback.message, tr("MSG_JOB_QUEUED", uid))
         await _launch_job(bot, uid, job)
+    elif channel_chat_id is not None:
+        # بالقناة ما نقدر نطلب "أرسل صورة" برسالة عادية (لأنها راح تصير منشور
+        # علني)؛ بدل هذا نطلب من الأدمن يرد على رسالة البوت نفسها بالصورة.
+        pending["awaiting_reply_image"] = True
+        await callback.message.edit_text(texts_module.MSG_CHANNEL_ASK_IMAGE_REPLY)
     else:
         pending_images[uid] = {"quick_mode": True, "audio_message_id": pending["message"].message_id}
         await callback.message.edit_text(tr("MSG_QUICK_NEED_IMAGE", uid))
     await callback.answer()
 
 
-@router.callback_query(F.data == "mode:custom")
+@router.callback_query(F.data.startswith("mode:custom"))
 async def on_mode_custom(callback, bot: Bot):
-    uid = callback.from_user.id if callback.from_user else 0
+    resolved = await resolve_callback_uid(callback, bot)
+    if resolved is None:
+        return
+    _, uid, _channel_chat_id = resolved
     pending = _get_pending_audio_or_none(uid)
     if not pending:
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
@@ -1552,91 +1765,148 @@ async def on_mode_custom(callback, bot: Bot):
     await callback.answer()
 
 
-def build_wiz_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
+def _channel_ctx(uid) -> tuple[int | None, int | None]:
+    """يستخرج (chat_id, message_id) من مفتاح سياق القناة، أو (None, None) لو مو سياق قناة."""
+    if not _is_channel_context(uid):
+        return None, None
+    rest = uid[len(CHANNEL_KEY_PREFIX):]
+    chat_str, _, msg_str = rest.partition(":")
+    try:
+        return int(chat_str), int(msg_str)
+    except ValueError:
+        return None, None
+
+
+def build_wiz_color_keyboard(user_id: int = 0, channel_chat_id: int | None = None,
+                              channel_message_id: int | None = None) -> InlineKeyboardMarkup:
+    def cb(data: str) -> str:
+        return _with_channel_suffix(data, channel_chat_id, channel_message_id)
+
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=tr("BTN_VINYL_BLACK", user_id), callback_data="wiz_color:default", style="primary")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_BLACK", user_id), callback_data=cb("wiz_color:default"), style="primary")],
         [
-            InlineKeyboardButton(text=tr("BTN_VINYL_PINK", user_id), callback_data="wiz_color:pink", style="primary"),
-            InlineKeyboardButton(text=tr("BTN_VINYL_BLUE", user_id), callback_data="wiz_color:blue", style="primary"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_PINK", user_id), callback_data=cb("wiz_color:pink"), style="primary"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_BLUE", user_id), callback_data=cb("wiz_color:blue"), style="primary"),
         ],
         [
-            InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data="wiz_color:yellow", style="primary"),
-            InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data="wiz_color:red", style="primary"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_YELLOW", user_id), callback_data=cb("wiz_color:yellow"), style="primary"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_RED", user_id), callback_data=cb("wiz_color:red"), style="primary"),
         ],
         [
-            InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data="wiz_color:green", style="primary"),
-            InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data="wiz_color:bloody", style="primary")
+            InlineKeyboardButton(text=tr("BTN_VINYL_GREEN", user_id), callback_data=cb("wiz_color:green"), style="primary"),
+            InlineKeyboardButton(text=tr("BTN_VINYL_BLOODY", user_id), callback_data=cb("wiz_color:bloody"), style="primary")
         ],
-        [InlineKeyboardButton(text=tr("BTN_VINYL_ROSE", user_id), callback_data="wiz_color:rose", style="primary")],
+        [InlineKeyboardButton(text=tr("BTN_VINYL_ROSE", user_id), callback_data=cb("wiz_color:rose"), style="primary")],
     ])
 
 
-def build_wiz_speed_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
+def build_wiz_speed_keyboard(user_id: int = 0, channel_chat_id: int | None = None,
+                              channel_message_id: int | None = None) -> InlineKeyboardMarkup:
     labels = [
         (tr("SPEED_LABEL_FULL", user_id), "full"),
         (tr("SPEED_LABEL_8RPM", user_id), "8"),
         (tr("SPEED_LABEL_33RPM", user_id), "33"),
         (tr("SPEED_LABEL_45RPM", user_id), "45"),
     ]
-    buttons = [InlineKeyboardButton(text=label, callback_data=f"wiz_speed:{value}") for label, value in labels]
+    buttons = [
+        InlineKeyboardButton(
+            text=label,
+            callback_data=_with_channel_suffix(f"wiz_speed:{value}", channel_chat_id, channel_message_id),
+        )
+        for label, value in labels
+    ]
     return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:]])
 
 
-def build_wiz_image_keyboard(has_thumbnail: bool, user_id: int = 0) -> InlineKeyboardMarkup:
+def build_wiz_image_keyboard(has_thumbnail: bool, user_id: int = 0, channel_chat_id: int | None = None,
+                              channel_message_id: int | None = None) -> InlineKeyboardMarkup:
     rows = []
     if has_thumbnail:
-        rows.append([InlineKeyboardButton(text=tr("BTN_WIZ_SKIP_IMAGE", user_id), callback_data="wiz_image:skip")])
-    rows.append([InlineKeyboardButton(text=tr("BTN_CANCEL", user_id), callback_data="cancel_queue")])
+        rows.append([InlineKeyboardButton(
+            text=tr("BTN_WIZ_SKIP_IMAGE", user_id),
+            callback_data=_with_channel_suffix("wiz_image:skip", channel_chat_id, channel_message_id),
+        )])
+    rows.append([InlineKeyboardButton(
+        text=tr("BTN_CANCEL", user_id),
+        callback_data=_with_channel_suffix("cancel_queue", channel_chat_id, channel_message_id),
+    )])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_wiz_segment_keyboard(total_duration: float, user_id: int = 0) -> InlineKeyboardMarkup:
+def build_wiz_segment_keyboard(total_duration: float, user_id: int = 0, channel_chat_id: int | None = None,
+                                channel_message_id: int | None = None) -> InlineKeyboardMarkup:
     minutes_count = max(1, math.ceil(total_duration / 60))
     buttons = []
     for i in range(minutes_count):
         start = i * 60
         if start >= total_duration:
             break
-        buttons.append(InlineKeyboardButton(text=tr("BTN_WIZ_SEGMENT_FMT", user_id).format(n=i + 1), callback_data=f"wiz_segment:{start}", style="success"))
+        buttons.append(InlineKeyboardButton(
+            text=tr("BTN_WIZ_SEGMENT_FMT", user_id).format(n=i + 1),
+            callback_data=_with_channel_suffix(f"wiz_segment:{start}", channel_chat_id, channel_message_id),
+            style="success",
+        ))
     rows = [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.callback_query(F.data.startswith("wiz_color:"))
 async def on_wiz_color(callback, bot: Bot):
-    uid = callback.from_user.id if callback.from_user else 0
+    resolved = await resolve_callback_uid(callback, bot)
+    if resolved is None:
+        return
+    base, uid, _channel_chat_id = resolved
     state = wizard_state.get(uid)
     if state is None or not _get_pending_audio_or_none(uid):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
-    choice = callback.data.split(":", 1)[1]
-    if choice in ("black","green","pink", "blue", "yellow", "red","bloody", "rose"):
+    choice = base.split(":", 1)[1]
+    if choice in ("black", "green", "pink", "blue", "yellow", "red", "bloody", "rose"):
         developer_vinyl_choice[uid] = choice
     else:
         developer_vinyl_choice.pop(uid, None)
-    await callback.message.edit_text(tr("MSG_WIZ_CHOOSE_SPEED", uid), reply_markup=build_wiz_speed_keyboard(uid))
+    ch_chat, ch_msg = _channel_ctx(uid)
+    await callback.message.edit_text(
+        tr("MSG_WIZ_CHOOSE_SPEED", uid),
+        reply_markup=build_wiz_speed_keyboard(uid, ch_chat, ch_msg),
+    )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("wiz_speed:"))
 async def on_wiz_speed(callback, bot: Bot):
-    uid = callback.from_user.id if callback.from_user else 0
+    resolved = await resolve_callback_uid(callback, bot)
+    if resolved is None:
+        return
+    base, uid, _channel_chat_id = resolved
     state = wizard_state.get(uid)
     pending = _get_pending_audio_or_none(uid)
     if state is None or not pending:
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
-    value = callback.data.split(":", 1)[1]
+    value = base.split(":", 1)[1]
     user_rotation_seconds[uid] = 0.0 if value == "full" else 60 / float(value)
 
     has_thumb = bool(pending["audio"].thumbnail)
-    await callback.message.edit_text(tr("MSG_WIZ_CHOOSE_IMAGE", uid), reply_markup=build_wiz_image_keyboard(has_thumb, uid))
+    ch_chat, ch_msg = _channel_ctx(uid)
+    image_text = (
+        texts_module.MSG_CHANNEL_ASK_IMAGE_REPLY_WITH_SKIP if ch_chat is not None and has_thumb
+        else texts_module.MSG_CHANNEL_ASK_IMAGE_REPLY if ch_chat is not None
+        else tr("MSG_WIZ_CHOOSE_IMAGE", uid)
+    )
+    await callback.message.edit_text(
+        image_text,
+        reply_markup=build_wiz_image_keyboard(has_thumb, uid, ch_chat, ch_msg),
+    )
     await callback.answer()
 
 
-@router.callback_query(F.data == "wiz_image:skip")
+@router.callback_query(F.data.startswith("wiz_image:skip"))
 async def on_wiz_image_skip(callback, bot: Bot):
-    uid = callback.from_user.id if callback.from_user else 0
+    resolved = await resolve_callback_uid(callback, bot)
+    if resolved is None:
+        return
+    _, uid, _channel_chat_id = resolved
     pending = _get_pending_audio_or_none(uid)
     state = wizard_state.get(uid)
     if state is None or not pending:
@@ -1649,7 +1919,7 @@ async def on_wiz_image_skip(callback, bot: Bot):
     await callback.answer()
 
 
-async def _wiz_advance_to_segment_or_finish(bot: Bot, uid: int, target_message: Message, send_func) -> None:
+async def _wiz_advance_to_segment_or_finish(bot: Bot, uid, target_message: Message, send_func) -> None:
     pending = pending_audio.get(uid)
     if not pending:
         return
@@ -1660,18 +1930,27 @@ async def _wiz_advance_to_segment_or_finish(bot: Bot, uid: int, target_message: 
         await _finish_wizard(bot, uid, send_func, segment_start=0.0)
         return
 
-    await send_func(tr("MSG_WIZ_CHOOSE_SEGMENT", uid), reply_markup=build_wiz_segment_keyboard(total_duration, uid))
+    ch_chat, ch_msg = _channel_ctx(uid)
+    sent = await send_func(
+        tr("MSG_WIZ_CHOOSE_SEGMENT", uid),
+        reply_markup=build_wiz_segment_keyboard(total_duration, uid, ch_chat, ch_msg),
+    )
+    if _is_channel_context(uid) and sent is not None and sent.message_id not in pending.get("channel_msg_ids", []):
+        pending.setdefault("channel_msg_ids", []).append(sent.message_id)
 
 
 @router.callback_query(F.data.startswith("wiz_segment:"))
 async def on_wiz_segment(callback, bot: Bot):
-    uid = callback.from_user.id if callback.from_user else 0
-    start_seconds = float(callback.data.split(":", 1)[1])
+    resolved = await resolve_callback_uid(callback, bot)
+    if resolved is None:
+        return
+    base, uid, _channel_chat_id = resolved
+    start_seconds = float(base.split(":", 1)[1])
     await _finish_wizard(bot, uid, callback.message.edit_text, segment_start=start_seconds)
     await callback.answer()
 
 
-async def _finish_wizard(bot: Bot, uid: int, send_func, segment_start: float) -> None:
+async def _finish_wizard(bot: Bot, uid, send_func, segment_start: float) -> None:
     pending = pending_audio.pop(uid, None)
     wizard_state.pop(uid, None)
     if not pending:
@@ -1685,18 +1964,29 @@ async def _finish_wizard(bot: Bot, uid: int, send_func, segment_start: float) ->
     starting_text = tr("MSG_WIZ_STARTING", uid)
     entities = build_premium_entities_from_text(starting_text)
     if entities:
-        await send_func(starting_text, entities=entities)
+        sent = await send_func(starting_text, entities=entities)
     else:
-        await send_func(starting_text)
+        sent = await send_func(starting_text)
+
+    if _is_channel_context(uid) and sent is not None:
+        job.setdefault("channel_msg_ids", [])
+        if sent.message_id not in job["channel_msg_ids"]:
+            job["channel_msg_ids"].append(sent.message_id)
+
     await _launch_job(bot, uid, job)
 
 
-@router.callback_query(F.data == "cancel_queue")
+@router.callback_query(F.data.startswith("cancel_queue"))
 async def on_cancel_queue(callback, bot: Bot):
-    cancel_user_jobs(callback.from_user.id if callback.from_user else 0)
-    uid_cq = callback.from_user.id if callback.from_user else 0
-    await callback.message.edit_text(tr("MSG_QUEUE_CANCELED_EDIT", uid_cq))
-    await callback.answer(tr("MSG_QUEUE_CANCELED_ANSWER", uid_cq))
+    resolved = await resolve_callback_uid(callback, bot)
+    if resolved is None:
+        return
+    _, uid, _channel_chat_id = resolved
+    cancel_user_jobs(uid)
+    pending_audio.pop(uid, None)
+    wizard_state.pop(uid, None)
+    await callback.message.edit_text(tr("MSG_QUEUE_CANCELED_EDIT", uid))
+    await callback.answer(tr("MSG_QUEUE_CANCELED_ANSWER", uid))
 
 
 @router.callback_query(F.data == "add_image")
@@ -1705,6 +1995,41 @@ async def on_add_image(callback, bot: Bot):
     await callback.message.reply(tr("MSG_SEND_IMAGE_NOW", uid))
     pending_images[callback.from_user.id] = {"waiting_for_image": True}
     await callback.answer()
+
+
+@router.channel_post(F.photo)
+async def on_channel_photo_reply(message: Message, bot: Bot):
+    """
+    يقابل on_photo_for_audio لكن بسياق القناة: بدل انتظار أي صورة توصل بالخاص،
+    ننتظر تحديدًا صورة تُرسل كـ "رد" على رسالة البوت (اختيار الوضع/خطوات
+    الـ Wizard)، ونربطها بالطلب الصحيح عبر channel_reply_index. أي صورة
+    بالقناة بدون رد على رسالة البوت تُتجاهل بالكامل (ما هي جزء من أي تدفق).
+    """
+    if not message.reply_to_message:
+        return
+    chat_id = message.chat.id
+    key = channel_reply_index.get((chat_id, message.reply_to_message.message_id))
+    if key is None:
+        return
+
+    pending = _get_pending_audio_or_none(key)
+    if not pending:
+        return
+
+    photo = message.photo[-1]
+    pending["thumbnail_file_id"] = photo.file_id
+    pending.setdefault("channel_msg_ids", []).append(message.message_id)
+
+    if pending.pop("awaiting_reply_image", False) and key not in wizard_state:
+        # سيناريو "إنشاء سريع" لملف بدون صورة مصغّرة أصلاً
+        pending_audio.pop(key, None)
+        job = dict(pending)
+        job["segment_start"] = 0.0
+        await _launch_job(bot, key, job)
+        return
+
+    # غير هذا نكون بمنتصف معالج التخصيص (wizard) بخطوة اختيار/استبدال الصورة
+    await _wiz_advance_to_segment_or_finish(bot, key, message, message.reply)
 
 
 @router.message(F.photo)
