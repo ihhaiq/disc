@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -8,7 +9,41 @@ from aiogram.client.telegram import TelegramAPIServer
 import config
 from handlers import router, load_custom_texts_into_memory
 from help_builder import router as help_router          # ← جديد
-from texts import LOG_BOT_RUNNING, LOG_USING_LOCAL_BOT_API
+from texts import LOG_BOT_RUNNING, LOG_USING_LOCAL_BOT_API, LOG_TEMP_CLEANUP_STARTUP_FMT
+
+logger = logging.getLogger(__name__)
+
+
+def cleanup_temp_dir_on_startup() -> None:
+    """
+    يمسح كل محتويات TEMP_DIR عند بدء تشغيل البوت.
+
+    السبب: لو البوت انطفى فجأة (crash / redeploy) وبنفس اللحظة فيه Jobs شغالة،
+    الملفات المؤقتة الخاصة بها (صوت/صورة/قرص/فيديو) تظل موجودة على القرص للأبد
+    لأن التنظيف الطبيعي (cleanup() في handlers.py) يصير فقط داخل نفس العملية
+    عبر finally. بما إنه ما فيه أي Job يمكن يكون شغّال فعليًا لحظة بدء التشغيل
+    (الطابور بالذاكرة يبدأ فاضي من جديد)، أي ملف موجود بـ TEMP_DIR الآن هو
+    بقايا من تشغيلة سابقة ويُعتبر آمن حذفه بالكامل.
+    """
+    if not os.path.isdir(config.TEMP_DIR):
+        return
+
+    removed = 0
+    for name in os.listdir(config.TEMP_DIR):
+        path = os.path.join(config.TEMP_DIR, name)
+        try:
+            if os.path.isfile(path) or os.path.islink(path):
+                os.remove(path)
+                removed += 1
+            elif os.path.isdir(path):
+                import shutil
+                shutil.rmtree(path, ignore_errors=True)
+                removed += 1
+        except OSError:
+            logger.exception("فشل حذف ملف مؤقت قديم: %s", path)
+
+    if removed:
+        logger.info(LOG_TEMP_CLEANUP_STARTUP_FMT, removed)
 
 
 async def main():
@@ -17,6 +52,7 @@ async def main():
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
     os.makedirs(config.TEMP_DIR, exist_ok=True)
+    cleanup_temp_dir_on_startup()
 
     # تحميل النصوص المخصصة من JSON الدائم
     load_custom_texts_into_memory()
