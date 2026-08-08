@@ -864,7 +864,7 @@ async def process_job(bot: Bot, job: dict) -> None:
         if _is_channel_context(uid):
             final_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(
-                    text=f"{CHANNEL_RESULT_EMOJI} كيف اسوي وحدة مثل هذي؟",
+                    text=f"{CHANNEL_RESULT_EMOJI} MAKE WITH LoVe",
                     url=CHANNEL_RESULT_URL,
                     style="danger",
                 )
