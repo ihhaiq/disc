@@ -253,12 +253,15 @@ BTN_QUICK_CREATE = "⚡ إنشاء سريع"
 BTN_CUSTOMIZE = "🎛 تخصيص"
 
 MSG_WIZ_CHOOSE_COLOR = "🎨 اختار لون القرص:"
+MSG_WIZ_CHOOSE_FRAME = "🩶 اختار القالب إذا تريده، أو اضغط «التالي» للاستمرار بدونه:"
 MSG_WIZ_CHOOSE_SPEED = "🎚 اختار سرعة الدوران:"
 MSG_WIZ_CHOOSE_IMAGE = (
     "🖼 أرسل صورة الغلاف الجديدة (تستبدل الحالية لو موجودة)،"
     "\nأو اضغط تخطي للاحتفاظ بالصورة الأصلية."
 )
 BTN_WIZ_SKIP_IMAGE = "⏭ تخطي (استخدم الصورة الأصلية)"
+BTN_WIZ_FRAME_SILVER = "🩶 الإطار الفضي"
+BTN_WIZ_FRAME_NEXT = "⏭ التالي"
 MSG_WIZ_NO_IMAGE_TO_SKIP = "⚠️ الملف ما فيه صورة أصلية، لازم ترسل صورة."
 MSG_WIZ_CHOOSE_SEGMENT = "⏱ الملف مدته أطول من دقيقة، اختار الدقيقة المراد تسجيلها:"
 MSG_WIZ_STARTING = "🚀 تمام، جار الإنشاء بالإعدادات المختارة..."
@@ -285,7 +288,6 @@ BTN_VINYL_ROSE = "ROSE💮"
 BTN_VINYL_GREEN = "اخضر تجريبي"
 BTN_VINYL_BLOODY = "🩸"
 BTN_VINYL_EMERALD = "EMERALD"
-BTN_VINYL_FRAME_CLASSIC = "🎚 إطار كلاسيكي"
 BTN_BACK = "🔙 رجوع"
 
 SPEED_LABEL_FULL = "دورة كاملة"
@@ -350,12 +352,15 @@ TEXTS_EN: dict[str, str] = {
     "BTN_QUICK_CREATE": "⚡ Quick create",
     "BTN_CUSTOMIZE": "🎛 Customize",
     "MSG_WIZ_CHOOSE_COLOR": "🎨 Choose the disc color:",
+    "MSG_WIZ_CHOOSE_FRAME": "🩶 Choose a frame if you want one, or press “Next” to continue without a frame:",
     "MSG_WIZ_CHOOSE_SPEED": "🎚 Choose the rotation speed:",
     "MSG_WIZ_CHOOSE_IMAGE": (
         "🖼 Send the new cover image (replaces the current one if any),"
         "\nor tap skip to keep the original image."
     ),
     "BTN_WIZ_SKIP_IMAGE": "⏭ Skip (use original image)",
+    "BTN_WIZ_FRAME_SILVER": "🩶 Silver frame",
+    "BTN_WIZ_FRAME_NEXT": "⏭ Next",
     "MSG_WIZ_NO_IMAGE_TO_SKIP": "⚠️ This file has no original image, you must send one.",
     "MSG_WIZ_CHOOSE_SEGMENT": "⏱ The file is longer than a minute, choose which minute to use:",
     "MSG_WIZ_STARTING": "🚀 Alright, creating your disc with the chosen settings...",
@@ -377,7 +382,6 @@ TEXTS_EN: dict[str, str] = {
     "BTN_VINYL_GREEN": "Green (beta)",
     "BTN_VINYL_BLOODY": "🩸",
     "BTN_VINYL_ROSE" : "💮 ROSE",
-    "BTN_VINYL_FRAME_CLASSIC": "🎚 Classic Frame",
     "BTN_BACK": "🔙 Back",
     "SPEED_LABEL_FULL": "Full turn",
     "SPEED_LABEL_8RPM": "8 RPM",

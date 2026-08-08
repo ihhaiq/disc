@@ -17,7 +17,7 @@ from aiogram.types import (
     InputRichMessage, ReplyParameters,
 )
 
-from compose import build_disc, build_disc_framed
+from compose import build_disc, resize_disc_for_frame
 from processor import get_duration, render_vinyl
 import config
 import limits
@@ -184,6 +184,7 @@ user_pending_jobs: dict[int, set[str]] = {}
 tracked_jobs: dict[str, dict] = {}
 canceled_job_ids: set[str] = set()
 developer_vinyl_choice: dict[int, str] = {}
+developer_frame_choice: dict[int, str | None] = {}
 wizard_state: dict[int, dict] = {}
 WIZARD_TTL_SECONDS = 600
 
@@ -1070,31 +1071,34 @@ async def process_job(bot: Bot, job: dict) -> None:
 
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
         animator.set_stage(tr("STAGE_BUILDING_DISC", uid))
-        # ⛔️ حُذفت خطوة "الإطار الإضافية" (frame) هنا. build_disc بملف compose.py
-        # يقبل فقط (thumb_path, vinyl_path, out_path, hole_ratio, size)، وكانت
-        # هذه الدالة تُستدعى بمعامل سادس إضافي (get_developer_frame_path) غير
-        # موجود بتوقيع build_disc إطلاقًا، فكان هذا يفشّل كل عملية بناء قرص
-        # بخطأ TypeError. الآن الاستدعاء مطابق تمامًا لتوقيع compose.build_disc.
-        #
-        # 🆕 "الإطار الكلاسيكي" (frame_classic) قالب مختلف عن باقي الألوان: ما
-        # عنده ملف vinyl_*.png (حلقة/ذراع فقط بدون أخاديد قرص)، فنبني القرص عبر
-        # build_disc_framed (خلفية غامقة + صورة الغلاف تغطي كامل فتحة الإطار)
-        # ثم نستخدم frame_classic.png نفسه كطبقة ثابتة (نفس دور shadow.png
-        # العادي) بدل get_developer_shadow_path — القرص يدور تحته والإطار يبقى
-        # ثابت فوقه، تمامًا مثل أي shadow آخر بـ processor.py.
+        # نبني القرص بالطريقة الافتراضية أولاً:
+        # القرص المختار + صورة الغلاف في المنتصف.
         vinyl_choice = job.get("vinyl_choice")
-        if vinyl_choice == "frame_classic":
+        frame_choice = job.get("frame_choice")
+
+        await asyncio.to_thread(
+            build_disc,
+            thumb_path,
+            get_developer_vinyl_path(uid, vinyl_choice),
+            disc_path,
+            config.HOLE_RATIO,
+            config.DISC_SIZE,
+        )
+        render_shadow_path = get_developer_shadow_path(uid, vinyl_choice)
+
+        # الإطار اختياري ومستقل عن اختيار القرص.
+        # إذا اختاره المستخدم، نصغّر القرص النهائي بعد تركيب صورة الغلاف،
+        # ثم نضيف الإطار كطبقة ثابتة في processor.py.
+        render_frame_path = None
+        if frame_choice == "silver":
             await asyncio.to_thread(
-                build_disc_framed, thumb_path, disc_path,
-                config.DISC_SIZE, config.FRAME_CLASSIC_LABEL_RATIO, config.FRAME_CLASSIC_DISC_RATIO,
+                resize_disc_for_frame,
+                disc_path,
+                disc_path,
+                config.FRAME_SILVER_DISC_RATIO,
+                config.DISC_SIZE,
             )
-            render_shadow_path = config.FRAME_CLASSIC_PATH
-        else:
-            await asyncio.to_thread(
-                build_disc, thumb_path, get_developer_vinyl_path(uid, vinyl_choice), disc_path,
-                config.HOLE_RATIO, config.DISC_SIZE,
-            )
-            render_shadow_path = get_developer_shadow_path(uid, vinyl_choice)
+            render_frame_path = config.FRAME_SILVER_PATH
 
         animator.set_stage(tr("STAGE_RENDERING_VIDEO", uid), percent=0)
 
@@ -1108,6 +1112,7 @@ async def process_job(bot: Bot, job: dict) -> None:
             max_duration=config.MAX_DURATION_SECONDS,
             start_offset=job.get("segment_start", 0.0),
             on_progress=on_render_progress,
+            frame_path=render_frame_path,
         )
         if not os.path.exists(out_path):
             raise FileNotFoundError(texts_module.ERR_OUTPUT_NOT_CREATED)
@@ -2176,6 +2181,8 @@ async def on_mode_custom(callback, bot: Bot):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     wizard_state[uid] = {}
+    # الإطار اختيار خاص بهذا الطلب؛ لا نرث اختيارًا من طلب سابق.
+    developer_frame_choice[uid] = None
     ch_chat, ch_msg = _channel_ctx(uid)
     await _edit_wizard_text(
         bot, uid, callback.message,
@@ -2274,11 +2281,35 @@ def build_wiz_color_keyboard(
                 style="primary"
             )
         ],
+    ])
+
+
+def build_wiz_frame_keyboard(
+    user_id: int = 0,
+    channel_chat_id: int | None = None,
+    channel_message_id: int | None = None,
+) -> InlineKeyboardMarkup:
+    def cb(data: str) -> str:
+        return _with_channel_suffix(data, channel_chat_id, channel_message_id)
+
+    selected = developer_frame_choice.get(user_id)
+    frame_text = tr("BTN_WIZ_FRAME_SILVER", user_id)
+    if selected == "silver":
+        frame_text += " ✅"
+
+    return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_FRAME_CLASSIC", user_id),
-                callback_data=cb("wiz_color:frame_classic"),
-                style="primary"
+                text=frame_text,
+                callback_data=cb("wiz_frame:silver"),
+                style="success" if selected == "silver" else "primary",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=tr("BTN_WIZ_FRAME_NEXT", user_id),
+                callback_data=cb("wiz_frame:next"),
+                style="primary",
             )
         ],
     ])
@@ -2345,16 +2376,53 @@ async def on_wiz_color(callback, bot: Bot):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     choice = base.split(":", 1)[1]
-    if choice in ("black", "green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "frame_classic"):
+    if choice in ("green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald"):
         developer_vinyl_choice[uid] = choice
     else:
+        # default/black = القرص الأسود الافتراضي.
         developer_vinyl_choice.pop(uid, None)
+
+    developer_frame_choice[uid] = None
     ch_chat, ch_msg = _channel_ctx(uid)
     await _edit_wizard_text(
         bot, uid, callback.message,
-        tr("MSG_WIZ_CHOOSE_SPEED", uid),
-        reply_markup=build_wiz_speed_keyboard(uid, ch_chat, ch_msg),
+        tr("MSG_WIZ_CHOOSE_FRAME", uid),
+        reply_markup=build_wiz_frame_keyboard(uid, ch_chat, ch_msg),
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("wiz_frame:"))
+async def on_wiz_frame(callback, bot: Bot):
+    resolved = await resolve_callback_uid(callback, bot)
+    if resolved is None:
+        return
+
+    base, uid, _channel_chat_id = resolved
+    state = wizard_state.get(uid)
+    pending = _get_pending_audio_or_none(uid)
+    if state is None or not pending:
+        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
+        return
+
+    choice = base.split(":", 1)[1]
+
+    if choice == "silver":
+        developer_frame_choice[uid] = "silver"
+        ch_chat, ch_msg = _channel_ctx(uid)
+        await _edit_wizard_text(
+            bot, uid, callback.message,
+            tr("MSG_WIZ_CHOOSE_FRAME", uid),
+            reply_markup=build_wiz_frame_keyboard(uid, ch_chat, ch_msg),
+        )
+    elif choice == "next":
+        ch_chat, ch_msg = _channel_ctx(uid)
+        await _edit_wizard_text(
+            bot, uid, callback.message,
+            tr("MSG_WIZ_CHOOSE_SPEED", uid),
+            reply_markup=build_wiz_speed_keyboard(uid, ch_chat, ch_msg),
+        )
+
     await callback.answer()
 
 
@@ -2449,6 +2517,7 @@ async def _finish_wizard(bot: Bot, uid, send_func, segment_start: float) -> None
     job["context_key"] = uid
     job["segment_start"] = segment_start
     job["vinyl_choice"] = developer_vinyl_choice.get(uid)
+    job["frame_choice"] = developer_frame_choice.pop(uid, None)
     job["rotation_seconds"] = user_rotation_seconds.get(uid, config.ROTATION_SECONDS)
 
     starting_text = tr("MSG_WIZ_STARTING", owner_id)

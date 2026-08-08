@@ -58,9 +58,10 @@ VINYL_ROSE_PATH = os.path.join(ASSETS_DIR, "vinyl_rose.png")
 SHADOW_ROSE_PATH = os.path.join(ASSETS_DIR, "shadow_rose.png")
 VINYL_EMERALD_PATH = os.path.join(ASSETS_DIR, "vinyl_emerald.png")
 
-FRAME_CLASSIC_PATH = os.path.join(ASSETS_DIR, "frame_classic.png")
-FRAME_CLASSIC_LABEL_RATIO = 0.74  # قطر صورة الغلاف / مقاس القرص (يغطي كامل فتحة الإطار)
-FRAME_CLASSIC_DISC_RATIO = 0.77   # قطر القرص الخلفي الغامق / مقاس القرص (يختفي بالكامل خلف الحلقة)
+FRAME_SILVER_PATH = os.path.join(ASSETS_DIR, "frame_silver.png")
+# قطر القرص بعد تصغيره ليدخل بالكامل داخل الفتحة الداخلية للإطار الفضي.
+# 0.70 من 640 = 448px، مع ترك حافة فضية ظاهرة من جميع الجهات.
+FRAME_SILVER_DISC_RATIO = 0.70
 
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
 
