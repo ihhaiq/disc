@@ -8,7 +8,7 @@ import uuid
 import re
 # ميو 
 from aiogram import Router, F, Bot
-from aiogram.enums import ChatAction, ChatType
+from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import (
@@ -28,6 +28,123 @@ import math
 from texts import BTN_VINYL_BLOODY , BTN_VINYL_ROSE , BTN_VINYL_EMERALD
 logger = logging.getLogger(__name__)
 router = Router()
+
+
+# ============================================================
+# Ephemeral Messages — Bot API 9.6+
+# ============================================================
+async def send_ephemeral_text(
+    bot: Bot,
+    chat_id: int,
+    user_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    entities: list[MessageEntity] | None = None,
+    callback_query_id: str | None = None,
+) -> Message:
+    """إرسال رسالة مؤقتة للمستخدم داخل مجموعة/سوبرغروب."""
+    return await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        receiver_user_id=user_id,
+        callback_query_id=callback_query_id,
+        reply_markup=reply_markup,
+        entities=entities,
+    )
+
+
+async def edit_ephemeral_text(
+    bot: Bot,
+    chat_id: int,
+    user_id: int,
+    ephemeral_message_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    entities: list[MessageEntity] | None = None,
+) -> bool:
+    """تعديل نفس الرسالة المؤقتة بدل إرسال رسالة جديدة."""
+    return await bot.edit_ephemeral_message_text(
+        chat_id=chat_id,
+        receiver_user_id=user_id,
+        ephemeral_message_id=ephemeral_message_id,
+        text=text,
+        reply_markup=reply_markup,
+        entities=entities,
+    )
+
+
+async def delete_ephemeral_text(
+    bot: Bot, chat_id: int, user_id: int, ephemeral_message_id: int
+) -> bool:
+    return await bot.delete_ephemeral_message(
+        chat_id=chat_id,
+        receiver_user_id=user_id,
+        ephemeral_message_id=ephemeral_message_id,
+    )
+
+
+def _ephemeral_id(pending: dict | None) -> int | None:
+    if not pending:
+        return None
+    value = pending.get("ephemeral_message_id")
+    return int(value) if value is not None else None
+
+
+def _group_pending_key_for_user(chat_id: int, user_id: int) -> str | None:
+    """أحدث طلب صوت نشط لهذا المستخدم داخل المجموعة."""
+    candidates = []
+    now = time.time()
+    for key, pending in pending_audio.items():
+        if not _is_group_context(key):
+            continue
+        original = pending.get("message")
+        if original is None or original.chat.id != chat_id:
+            continue
+        if not original.from_user or original.from_user.id != user_id:
+            continue
+        if now > pending.get("expires_at", 0):
+            continue
+        candidates.append((original.message_id, key))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+async def _edit_wizard_text(
+    bot: Bot,
+    uid,
+    target_message: Message,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    entities: list[MessageEntity] | None = None,
+) -> Message | None:
+    """يعدّل نفس رسالة الـWizard؛ بالمجموعة تكون Ephemeral."""
+    if _is_group_context(uid):
+        pending = pending_audio.get(uid)
+        eid = _ephemeral_id(pending)
+        if eid is None:
+            return None
+        original = pending.get("message")
+        owner_id = pending.get("owner_user_id") or (
+            original.from_user.id if original and original.from_user else 0
+        )
+        await edit_ephemeral_text(
+            bot,
+            target_message.chat.id,
+            owner_id,
+            eid,
+            text,
+            reply_markup=reply_markup,
+            entities=entities,
+        )
+        return target_message
+
+    return await target_message.edit_text(
+        text,
+        reply_markup=reply_markup,
+        entities=entities,
+    )
 
 
 # ============================================================
@@ -552,6 +669,63 @@ def render_rich_status_html(
     )
 
 
+class EphemeralStatusAnimator:
+    """يحدّث نفس رسالة الـEphemeral التي بدأ بها الـWizard."""
+    def __init__(self, bot: Bot, chat_id: int, user_id: int, ephemeral_message_id: int):
+        self.bot = bot
+        self.chat_id = chat_id
+        self.user_id = user_id
+        self.ephemeral_message_id = ephemeral_message_id
+        self.stage_text = texts_module.STAGE_PREPARING
+        self.percent: float = 0.0
+        self._last_rendered: str | None = None
+        self._stop_event = asyncio.Event()
+        self._task: asyncio.Task | None = None
+
+    def set_stage(self, stage_text: str, percent: float | None = None) -> None:
+        self.stage_text = stage_text
+        if percent is not None:
+            self.percent = percent
+
+    async def _push_update(self) -> None:
+        text = self.stage_text + (f" {int(self.percent)}%" if self.percent is not None else "…")
+        if text == self._last_rendered:
+            return
+        try:
+            await edit_ephemeral_text(
+                self.bot,
+                self.chat_id,
+                self.user_id,
+                int(self.ephemeral_message_id),
+                text,
+            )
+            self._last_rendered = text
+        except TelegramBadRequest:
+            pass
+        except Exception:
+            logger.exception(texts_module.LOG_PROGRESS_UPDATE_FAILED)
+
+    async def _run(self) -> None:
+        while not self._stop_event.is_set():
+            await self._push_update()
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=STATUS_UPDATE_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+
+    def start(self) -> None:
+        if self._task is None:
+            self._task = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        self._stop_event.set()
+        if self._task is not None:
+            try:
+                await self._task
+            except Exception:
+                pass
+
+
 class StatusAnimator:
     """يحدّث رسالة الحالة الغنية (Rich Message) بشكل دوري: إيموجي متسلسل لكل مرحلة + شريط تظليل."""
 
@@ -759,8 +933,8 @@ def build_lang_button() -> InlineKeyboardButton:
     )
 
 
-def get_developer_vinyl_path(user_id: int) -> str:
-    choice = developer_vinyl_choice.get(user_id)
+def get_developer_vinyl_path(user_id: int, choice_override: str | None = None) -> str:
+    choice = choice_override if choice_override is not None else developer_vinyl_choice.get(user_id)
     if choice == "pink":
         return config.VINYL_PINK_PATH
     if choice == "yellow":
@@ -780,8 +954,8 @@ def get_developer_vinyl_path(user_id: int) -> str:
     return config.VINYL_PATH
 
 
-def get_developer_shadow_path(user_id: int) -> str:
-    choice = developer_vinyl_choice.get(user_id)
+def get_developer_shadow_path(user_id: int, choice_override: str | None = None) -> str:
+    choice = choice_override if choice_override is not None else developer_vinyl_choice.get(user_id)
     if choice == "pink":
         return config.SHADOW_PINK_PATH
     if choice == "yellow":
@@ -837,6 +1011,7 @@ async def process_job(bot: Bot, job: dict) -> None:
     message = job["message"]
     audio = job["audio"]
     uid = job["uid"]
+    context_key = job.get("context_key", uid)
     job_id = job["job_id"]
 
     audio_path = tmp(f"{uid}_{job_id}_audio.{audio.file_name.split('.')[-1] if audio.file_name else 'mp3'}")
@@ -845,11 +1020,23 @@ async def process_job(bot: Bot, job: dict) -> None:
     out_path = tmp(f"{uid}_{job_id}_out.mp4")
     job["temp_paths"] = [audio_path, thumb_path, disc_path, out_path]
 
-    initial_html = render_rich_status_html(
-        0.0, tr("MSG_RICH_STATUS_INTRO", uid)
-    )
-    status = await send_rich_message(bot, message.chat.id, initial_html, reply_to_message_id=message.message_id)
-    animator = StatusAnimator(status, bot, uid)
+    if _is_group_context(context_key):
+        ephemeral_id = job.get("status_ephemeral_message_id")
+        if ephemeral_id is None:
+            # مسار احتياطي فقط إذا لم تكن هناك رسالة Wizard Ephemeral محفوظة.
+            status = await send_ephemeral_text(
+                bot, message.chat.id, uid,
+                tr("STAGE_PREPARING", uid),
+            )
+            ephemeral_id = status.ephemeral_message_id
+            job["status_ephemeral_message_id"] = ephemeral_id
+        animator = EphemeralStatusAnimator(bot, message.chat.id, uid, int(ephemeral_id))
+    else:
+        initial_html = render_rich_status_html(
+            0.0, tr("MSG_RICH_STATUS_INTRO", uid)
+        )
+        status = await send_rich_message(bot, message.chat.id, initial_html, reply_to_message_id=message.message_id)
+        animator = StatusAnimator(status, bot, uid)
     animator.start()
 
     duration_warning_msg: Message | None = None
@@ -874,9 +1061,12 @@ async def process_job(bot: Bot, job: dict) -> None:
 
         duration = await get_duration(audio_path)
         if duration > config.MAX_DURATION_SECONDS and not job.get("segment_start"):
-            duration_warning_msg = await reply_with_premium_emoji(
-                message, tr("MSG_DURATION_TOO_LONG_FMT", uid).format(duration=duration)
-            )
+            if _is_group_context(context_key):
+                animator.set_stage(tr("MSG_DURATION_TOO_LONG_FMT", uid).format(duration=duration))
+            else:
+                duration_warning_msg = await reply_with_premium_emoji(
+                    message, tr("MSG_DURATION_TOO_LONG_FMT", uid).format(duration=duration)
+                )
 
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
         animator.set_stage(tr("STAGE_BUILDING_DISC", uid))
@@ -886,7 +1076,7 @@ async def process_job(bot: Bot, job: dict) -> None:
         # موجود بتوقيع build_disc إطلاقًا، فكان هذا يفشّل كل عملية بناء قرص
         # بخطأ TypeError. الآن الاستدعاء مطابق تمامًا لتوقيع compose.build_disc.
         await asyncio.to_thread(
-            build_disc, thumb_path, get_developer_vinyl_path(uid), disc_path,
+            build_disc, thumb_path, get_developer_vinyl_path(uid, job.get("vinyl_choice")), disc_path,
             config.HOLE_RATIO, config.DISC_SIZE,
         )
 
@@ -896,8 +1086,8 @@ async def process_job(bot: Bot, job: dict) -> None:
             animator.set_stage(tr("STAGE_RENDERING_VIDEO", uid), percent=percent)
 
         await render_vinyl(
-            disc_path, get_developer_shadow_path(uid), audio_path, out_path,
-            rotation_seconds=get_user_rotation_seconds(uid),
+            disc_path, get_developer_shadow_path(uid, job.get("vinyl_choice")), audio_path, out_path,
+            rotation_seconds=job.get("rotation_seconds", get_user_rotation_seconds(uid)),
             size=config.DISC_SIZE, fps=config.OUTPUT_FPS,
             max_duration=config.MAX_DURATION_SECONDS,
             start_offset=job.get("segment_start", 0.0),
@@ -910,7 +1100,7 @@ async def process_job(bot: Bot, job: dict) -> None:
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
 
         final_keyboard = None
-        if _is_shared_context(uid):
+        if _is_shared_context(context_key):
             final_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(
                     text=f"{CHANNEL_RESULT_EMOJI} كيف اسوي وحدة مثل هذي؟",
@@ -922,8 +1112,8 @@ async def process_job(bot: Bot, job: dict) -> None:
         try:
             await message.reply_video_note(FSInputFile(out_path), length=config.DISC_SIZE, reply_markup=final_keyboard)
         except TelegramBadRequest as e:
-            if _is_shared_context(uid) and ("rights" in str(e).lower() or "administrator" in str(e).lower()):
-                place_label = "القناة" if _is_channel_context(uid) else "المجموعة"
+            if _is_shared_context(context_key) and ("rights" in str(e).lower() or "administrator" in str(e).lower()):
+                place_label = "القناة" if _is_channel_context(context_key) else "المجموعة"
                 await notify_missing_channel_permission(
                     bot, message.chat.id, message.chat.title or place_label,
                     f"نشر فيديو/رسائل بـ{place_label} (صلاحية Post Messages).",
@@ -933,13 +1123,13 @@ async def process_job(bot: Bot, job: dict) -> None:
 
         # تنظيف رسائل البوت الوسيطة (اختيار الوضع + خطوات الـ Wizard) بسياق
         # القناة/المجموعة فقط — ما نلمس منشور/رسالة الصوت الأصلية للمستخدم إطلاقًا.
-        if _is_shared_context(uid):
+        if _is_shared_context(context_key):
             for msg_id in job.get("channel_msg_ids", []):
                 try:
                     await bot.delete_message(message.chat.id, msg_id)
                 except Exception:
                     pass
-            ch_chat, _ch_msg = _channel_ctx(uid)
+            ch_chat, _ch_msg = _channel_ctx(context_key)
             if ch_chat is not None:
                 for reply_key, mapped in list(channel_reply_index.items()):
                     if mapped == uid:
@@ -952,10 +1142,13 @@ async def process_job(bot: Bot, job: dict) -> None:
         # لكن نبي كمان نبلّغ المستخدم برسالة واضحة بدل ما تختفي المهمة بصمت.
         logger.warning(texts_module.LOG_JOB_TIMEOUT)
         try:
-            await reply_with_premium_emoji(
-                message,
-                texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=JOB_TIMEOUT_SECONDS / 60),
-            )
+            if _is_group_context(context_key):
+                animator.set_stage(texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=JOB_TIMEOUT_SECONDS / 60))
+            else:
+                await reply_with_premium_emoji(
+                    message,
+                    texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=JOB_TIMEOUT_SECONDS / 60),
+                )
         except Exception:
             logger.exception(texts_module.LOG_SEND_ERROR_FAILED)
         raise
@@ -963,14 +1156,22 @@ async def process_job(bot: Bot, job: dict) -> None:
         logger.exception(texts_module.LOG_PROCESS_JOB_FAILED)
         error_text = str(e) or repr(e) or e.__class__.__name__
         try:
-            await reply_with_premium_emoji(message, tr("MSG_PROCESSING_ERROR_FMT", uid).format(error_text=error_text))
+            if _is_group_context(context_key):
+                animator.set_stage(tr("MSG_PROCESSING_ERROR_FMT", uid).format(error_text=error_text))
+            else:
+                await reply_with_premium_emoji(message, tr("MSG_PROCESSING_ERROR_FMT", uid).format(error_text=error_text))
         except Exception:
             logger.exception(texts_module.LOG_SEND_ERROR_FAILED)
     finally:
         await animator.stop()
         cleanup(audio_path, thumb_path, disc_path, out_path)
         try:
-            await status.delete()
+            if _is_group_context(context_key):
+                eid = job.get("status_ephemeral_message_id")
+                if eid is not None:
+                    await delete_ephemeral_text(bot, message.chat.id, uid, int(eid))
+            else:
+                await status.delete()
         except Exception:
             pass
         # رسالة "الملف أطول من المسموح" (وفيها إشارة لتغيير اللغة للإنكليزية
@@ -1092,7 +1293,7 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
 ])
 
 
-@router.message(F.text == "/dev", F.chat.type == ChatType.PRIVATE)
+@router.message(F.text == "/dev", F.chat.type == "private")
 async def on_dev(message: Message):
     if not message.from_user or message.from_user.id != config.DEVELOPER_ID:
         return
@@ -1344,10 +1545,7 @@ async def on_dev_whitelist_back(callback, bot: Bot):
     await callback.answer()
 
 
-@router.message(
-    lambda m: bool(m.from_user) and m.from_user.id in awaiting_whitelist_add,
-    F.chat.type == ChatType.PRIVATE,
-)
+@router.message(lambda m: bool(m.from_user) and m.from_user.id in awaiting_whitelist_add, F.chat.type == "private")
 async def on_whitelist_target_input(message: Message, bot: Bot):
     uid = message.from_user.id
     awaiting_whitelist_add.discard(uid)
@@ -1422,7 +1620,7 @@ async def on_dev_text_edit(callback, bot: Bot):
     await callback.answer()
 
 
-@router.message(Command("search"), F.chat.type == ChatType.PRIVATE)
+@router.message(Command("search"), F.chat.type == "private")
 async def on_dev_search(message: Message, command: CommandObject):
     """
     🔍 /search <كلمة البحث>
@@ -1476,7 +1674,7 @@ async def on_dev_search(message: Message, command: CommandObject):
     await message.reply("\n\n".join(lines))
 
 
-@router.message(Command("edit"), F.chat.type == ChatType.PRIVATE)
+@router.message(Command("edit"), F.chat.type == "private")
 async def on_dev_edit_command(message: Message, command: CommandObject):
     """
     ✏️ /edit VAR_NAME [ar|en]
@@ -1536,7 +1734,7 @@ async def on_dev_text_back(callback, bot: Bot):
     await callback.answer()
 
 
-@router.message(F.text == "/cancel_edit", F.chat.type == ChatType.PRIVATE)
+@router.message(F.text == "/cancel_edit", F.chat.type == "private")
 async def on_cancel_text_edit(message: Message):
     uid = message.from_user.id if message.from_user else 0
     if uid in awaiting_text_value:
@@ -1577,7 +1775,7 @@ def normalize_dev_input(text: str) -> str:
     lambda m: bool(m.from_user)
     and m.from_user.id == config.DEVELOPER_ID
     and m.from_user.id in awaiting_text_value,
-    F.chat.type == ChatType.PRIVATE,
+    F.chat.type == "private",
 )
 async def on_text_value_input(message: Message, bot: Bot):
     uid = message.from_user.id
@@ -1653,7 +1851,7 @@ async def on_text_value_input(message: Message, bot: Bot):
     await message.reply(success_msg, reply_markup=build_dev_keyboard())
 
 
-@router.message(Command("start"), F.chat.type == ChatType.PRIVATE)
+@router.message(Command("start"), F.chat.type == "private")
 async def on_start(message: Message):
     uid = message.from_user.id if message.from_user else 0
     await safe_reply(
@@ -1771,25 +1969,29 @@ async def on_channel_audio(message: Message, bot: Bot):
     pending_audio[key]["channel_prompt_message_id"] = prompt.message_id
 
 
-@router.message(
-    F.audio,
-    F.chat.type.in_({ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}),
-)
+@router.message(F.audio)
 async def on_audio(message: Message, bot: Bot):
-    uid = message.from_user.id if message.from_user else 0
+    owner_id = message.from_user.id if message.from_user else 0
+    is_group = message.chat.type in ("group", "supergroup")
+    uid = _group_key(message.chat.id, message.message_id) if is_group else owner_id
     audio = message.audio
 
-    if uid != config.DEVELOPER_ID and not limits.can_create(uid):
-        hours = max(1, math.ceil(limits.get_reset_seconds(uid) / 3600))
-        await message.reply(
-            tr("MSG_LIMIT_REACHED_FMT", uid).format(
-                limit=limits.get_daily_limit(uid),
-                hours=hours,
-                premium_limit=config.PREMIUM_DAILY_LIMIT,
-                price=config.STARS_SUBSCRIPTION_PRICE,
-            ),
-            reply_markup=build_buy_stars_keyboard(uid),
+    if owner_id != config.DEVELOPER_ID and not limits.can_create(owner_id):
+        hours = max(1, math.ceil(limits.get_reset_seconds(owner_id) / 3600))
+        limit_text = tr("MSG_LIMIT_REACHED_FMT", owner_id).format(
+            limit=limits.get_daily_limit(owner_id),
+            hours=hours,
+            premium_limit=config.PREMIUM_DAILY_LIMIT,
+            price=config.STARS_SUBSCRIPTION_PRICE,
         )
+        if is_group:
+            await send_ephemeral_text(
+                bot, message.chat.id, owner_id,
+                limit_text,
+                reply_markup=build_buy_stars_keyboard(owner_id),
+            )
+        else:
+            await message.reply(limit_text, reply_markup=build_buy_stars_keyboard(owner_id))
         return
 
     if audio.file_size and audio.file_size > config.MAX_TELEGRAM_AUDIO_SIZE_BYTES:
@@ -1800,17 +2002,31 @@ async def on_audio(message: Message, bot: Bot):
         "message": message,
         "expires_at": time.time() + WIZARD_TTL_SECONDS,
         "job_id": uuid.uuid4().hex,
-        "uid": uid,
+        "uid": owner_id,
+        "owner_user_id": owner_id,
     }
     wizard_state.pop(uid, None)
     pending_images.pop(uid, None)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=tr("BTN_QUICK_CREATE", uid), callback_data="mode:quick")],
-        [InlineKeyboardButton(text=tr("BTN_CUSTOMIZE", uid), callback_data="mode:custom")],
-        [InlineKeyboardButton(text=tr("BTN_CANCEL", uid), callback_data="cancel_queue")],
+        [InlineKeyboardButton(text=tr("BTN_QUICK_CREATE", owner_id), callback_data="mode:quick")],
+        [InlineKeyboardButton(text=tr("BTN_CUSTOMIZE", owner_id), callback_data="mode:custom")],
+        [InlineKeyboardButton(text=tr("BTN_CANCEL", owner_id), callback_data="cancel_queue")],
     ])
-    await message.reply(tr("MSG_CHOOSE_MODE", uid), reply_markup=keyboard)
+    if is_group:
+        group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=tr("BTN_QUICK_CREATE", owner_id), callback_data=_with_channel_suffix("mode:quick", message.chat.id, message.message_id))],
+            [InlineKeyboardButton(text=tr("BTN_CUSTOMIZE", owner_id), callback_data=_with_channel_suffix("mode:custom", message.chat.id, message.message_id))],
+            [InlineKeyboardButton(text=tr("BTN_CANCEL", owner_id), callback_data=_with_channel_suffix("cancel_queue", message.chat.id, message.message_id))],
+        ])
+        sent = await send_ephemeral_text(
+            bot, message.chat.id, owner_id,
+            tr("MSG_CHOOSE_MODE", owner_id),
+            reply_markup=group_keyboard,
+        )
+        pending_audio[uid]["ephemeral_message_id"] = sent.ephemeral_message_id
+    else:
+        await message.reply(tr("MSG_CHOOSE_MODE", owner_id), reply_markup=keyboard)
 
 
 def _get_pending_audio_or_none(uid: int) -> dict | None:
@@ -1824,8 +2040,11 @@ def _get_pending_audio_or_none(uid: int) -> dict | None:
 
 async def _launch_job(bot: Bot, uid: int, job: dict) -> None:
     await start_job_worker(bot)
+    owner_id = job.get("owner_user_id", job.get("uid", uid))
+    if _is_group_context(job.get("context_key", uid)):
+        job["uid"] = owner_id
     tracked_jobs[job["job_id"]] = job
-    user_pending_jobs.setdefault(uid, set()).add(job["job_id"])
+    user_pending_jobs.setdefault(owner_id, set()).add(job["job_id"])
     enqueue_job(job)
 
 
@@ -1842,19 +2061,24 @@ async def on_mode_quick(callback, bot: Bot):
 
     audio = pending["audio"]
     if audio.thumbnail:
-        pending_audio.pop(uid, None)
         job = dict(pending)
+        job["context_key"] = uid
+        if _is_group_context(uid):
+            job["uid"] = pending.get("owner_user_id", uid)
+            job["status_ephemeral_message_id"] = _ephemeral_id(pending)
+        else:
+            await edit_text_with_premium_emoji(callback.message, tr("MSG_JOB_QUEUED", uid))
+        pending_audio.pop(uid, None)
         job["segment_start"] = 0.0
-        await edit_text_with_premium_emoji(callback.message, tr("MSG_JOB_QUEUED", uid))
-        await _launch_job(bot, uid, job)
+        await _launch_job(bot, job["uid"], job)
     elif channel_chat_id is not None:
         # بالقناة ما نقدر نطلب "أرسل صورة" برسالة عادية (لأنها راح تصير منشور
         # علني)؛ بدل هذا نطلب من الأدمن يرد على رسالة البوت نفسها بالصورة.
         pending["awaiting_reply_image"] = True
-        await callback.message.edit_text(texts_module.MSG_CHANNEL_ASK_IMAGE_REPLY)
+        await _edit_wizard_text(bot, uid, callback.message, texts_module.MSG_CHANNEL_ASK_IMAGE_REPLY)
     else:
         pending_images[uid] = {"quick_mode": True, "audio_message_id": pending["message"].message_id}
-        await callback.message.edit_text(tr("MSG_QUICK_NEED_IMAGE", uid))
+        await _edit_wizard_text(bot, uid, callback.message, tr("MSG_QUICK_NEED_IMAGE", uid))
     await callback.answer()
 
 
@@ -1870,7 +2094,8 @@ async def on_mode_custom(callback, bot: Bot):
         return
     wizard_state[uid] = {}
     ch_chat, ch_msg = _channel_ctx(uid)
-    await callback.message.edit_text(
+    await _edit_wizard_text(
+        bot, uid, callback.message,
         tr("MSG_WIZ_CHOOSE_COLOR", uid),
         reply_markup=build_wiz_color_keyboard(uid, ch_chat, ch_msg),
     )
@@ -2035,7 +2260,8 @@ async def on_wiz_color(callback, bot: Bot):
     else:
         developer_vinyl_choice.pop(uid, None)
     ch_chat, ch_msg = _channel_ctx(uid)
-    await callback.message.edit_text(
+    await _edit_wizard_text(
+        bot, uid, callback.message,
         tr("MSG_WIZ_CHOOSE_SPEED", uid),
         reply_markup=build_wiz_speed_keyboard(uid, ch_chat, ch_msg),
     )
@@ -2063,7 +2289,8 @@ async def on_wiz_speed(callback, bot: Bot):
         else texts_module.MSG_CHANNEL_ASK_IMAGE_REPLY if ch_chat is not None
         else tr("MSG_WIZ_CHOOSE_IMAGE", uid)
     )
-    await callback.message.edit_text(
+    await _edit_wizard_text(
+        bot, uid, callback.message,
         image_text,
         reply_markup=build_wiz_image_keyboard(has_thumb, uid, ch_chat, ch_msg),
     )
@@ -2084,7 +2311,7 @@ async def on_wiz_image_skip(callback, bot: Bot):
     if not pending["audio"].thumbnail:
         await callback.answer(tr("MSG_WIZ_NO_IMAGE_TO_SKIP", uid), show_alert=True)
         return
-    await _wiz_advance_to_segment_or_finish(bot, uid, callback.message, callback.message.edit_text)
+    await _wiz_advance_to_segment_or_finish(bot, uid, callback.message, lambda text, **kwargs: _edit_wizard_text(bot, uid, callback.message, text, **kwargs))
     await callback.answer()
 
 
@@ -2115,7 +2342,7 @@ async def on_wiz_segment(callback, bot: Bot):
         return
     base, uid, _channel_chat_id = resolved
     start_seconds = float(base.split(":", 1)[1])
-    await _finish_wizard(bot, uid, callback.message.edit_text, segment_start=start_seconds)
+    await _finish_wizard(bot, uid, lambda text, **kwargs: _edit_wizard_text(bot, uid, callback.message, text, **kwargs), segment_start=start_seconds)
     await callback.answer()
 
 
@@ -2127,22 +2354,32 @@ async def _finish_wizard(bot: Bot, uid, send_func, segment_start: float) -> None
         return
 
     job = dict(pending)
-    job["uid"] = uid
+    owner_id = pending.get("owner_user_id", uid)
+    job["uid"] = owner_id
+    job["context_key"] = uid
     job["segment_start"] = segment_start
+    job["vinyl_choice"] = developer_vinyl_choice.get(uid)
+    job["rotation_seconds"] = user_rotation_seconds.get(uid, config.ROTATION_SECONDS)
 
-    starting_text = tr("MSG_WIZ_STARTING", uid)
+    starting_text = tr("MSG_WIZ_STARTING", owner_id)
     entities = build_premium_entities_from_text(starting_text)
-    if entities:
-        sent = await send_func(starting_text, entities=entities)
+
+    if _is_group_context(uid):
+        # نفس رسالة الـEphemeral تستمر من الـWizard إلى مراحل المعالجة.
+        # لا ننشئ رسالة ثانية؛ process_job سيحدّث هذه الرسالة نفسها.
+        job["status_ephemeral_message_id"] = _ephemeral_id(pending)
     else:
-        sent = await send_func(starting_text)
+        if entities:
+            sent = await send_func(starting_text, entities=entities)
+        else:
+            sent = await send_func(starting_text)
 
-    if _is_shared_context(uid) and sent is not None:
-        job.setdefault("channel_msg_ids", [])
-        if sent.message_id not in job["channel_msg_ids"]:
-            job["channel_msg_ids"].append(sent.message_id)
+        if _is_shared_context(uid) and sent is not None:
+            job.setdefault("channel_msg_ids", [])
+            if sent.message_id not in job["channel_msg_ids"]:
+                job["channel_msg_ids"].append(sent.message_id)
 
-    await _launch_job(bot, uid, job)
+    await _launch_job(bot, owner_id, job)
 
 
 @router.callback_query(F.data.startswith("cancel_queue"))
@@ -2151,10 +2388,20 @@ async def on_cancel_queue(callback, bot: Bot):
     if resolved is None:
         return
     _, uid, _channel_chat_id = resolved
-    cancel_user_jobs(uid)
+    pending = pending_audio.get(uid)
+    owner_id = pending.get("owner_user_id", uid) if pending else uid
+    cancel_user_jobs(owner_id)
+    if _is_group_context(uid):
+        eid = _ephemeral_id(pending)
+        if eid is not None:
+            try:
+                await delete_ephemeral_text(bot, callback.message.chat.id, owner_id, eid)
+            except Exception:
+                pass
+    else:
+        await callback.message.edit_text(tr("MSG_QUEUE_CANCELED_EDIT", uid))
     pending_audio.pop(uid, None)
     wizard_state.pop(uid, None)
-    await callback.message.edit_text(tr("MSG_QUEUE_CANCELED_EDIT", uid))
     await callback.answer(tr("MSG_QUEUE_CANCELED_ANSWER", uid))
 
 
@@ -2193,6 +2440,7 @@ async def on_channel_photo_reply(message: Message, bot: Bot):
         # سيناريو "إنشاء سريع" لملف بدون صورة مصغّرة أصلاً
         pending_audio.pop(key, None)
         job = dict(pending)
+        job["context_key"] = key
         job["segment_start"] = 0.0
         await _launch_job(bot, key, job)
         return
@@ -2201,15 +2449,14 @@ async def on_channel_photo_reply(message: Message, bot: Bot):
     await _wiz_advance_to_segment_or_finish(bot, key, message, message.reply)
 
 
-@router.message(
-    F.photo,
-    F.chat.type.in_({ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP}),
-)
+@router.message(F.photo)
 async def on_photo_for_audio(message: Message, bot: Bot):
     global developer_menu_image_file_id
-    uid = message.from_user.id if message.from_user else 0
-    if uid == config.DEVELOPER_ID and uid in awaiting_menu_image:
-        awaiting_menu_image.discard(uid)
+    owner_id = message.from_user.id if message.from_user else 0
+    group_uid = _group_pending_key_for_user(message.chat.id, owner_id) if message.chat.type in ("group", "supergroup") else None
+    uid = group_uid or owner_id
+    if owner_id == config.DEVELOPER_ID and owner_id in awaiting_menu_image:
+        awaiting_menu_image.discard(owner_id)
         developer_menu_image_file_id = message.photo[-1].file_id
         await message.reply(texts_module.MSG_DEV_MENU_IMAGE_SAVED)
         return
@@ -2222,11 +2469,19 @@ async def on_photo_for_audio(message: Message, bot: Bot):
             return
         photo = message.photo[-1]
         pending_entry["thumbnail_file_id"] = photo.file_id
-        await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
-        await _wiz_advance_to_segment_or_finish(bot, uid, message, message.reply)
+        if _is_group_context(uid):
+            original = pending_entry.get("message")
+            await _edit_wizard_text(bot, uid, original, tr("MSG_IMAGE_RECEIVED", owner_id))
+            await _wiz_advance_to_segment_or_finish(
+                bot, uid, original,
+                lambda text, **kwargs: _edit_wizard_text(bot, uid, original, text, **kwargs),
+            )
+        else:
+            await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
+            await _wiz_advance_to_segment_or_finish(bot, uid, message, message.reply)
         return
 
-    pending = pending_images.get(message.from_user.id)
+    pending = pending_images.get(uid)
     if not pending:
         return
 
@@ -2239,46 +2494,57 @@ async def on_photo_for_audio(message: Message, bot: Bot):
             await message.reply(tr("MSG_AUDIO_EXPIRED", uid))
             return
 
-        pending_audio.pop(uid, None)
-        pending_images.pop(uid, None)
-
         job = dict(pending_entry)
         job["thumbnail_file_id"] = photo.file_id
-        job["uid"] = uid
+        job["uid"] = pending_entry.get("owner_user_id", uid)
+        job["context_key"] = uid
         job["segment_start"] = 0.0
 
-        await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
-        await _launch_job(bot, uid, job)
+        if not _is_group_context(uid):
+            await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
+        else:
+            original = job.get("message")
+            if original is not None:
+                await _edit_wizard_text(bot, uid, original, tr("MSG_IMAGE_RECEIVED", owner_id))
+        pending_audio.pop(uid, None)
+        pending_images.pop(uid, None)
+        await _launch_job(bot, job["uid"], job)
         return
 
     if pending.get("waiting_for_image"):
         photo = message.photo[-1]
-        pending_entry = pending_audio.get(message.from_user.id)
+        pending_entry = pending_audio.get(uid)
         if not pending_entry:
             await message.reply(tr("MSG_NO_PENDING_AUDIO", uid))
             return
 
         if time.time() > pending_entry["expires_at"]:
-            pending_audio.pop(message.from_user.id, None)
-            pending_images.pop(message.from_user.id, None)
+            pending_audio.pop(uid, None)
+            pending_images.pop(uid, None)
             await message.reply(tr("MSG_AUDIO_EXPIRED", uid))
             return
 
-        pending_images[message.from_user.id] = {"photo_file_id": photo.file_id, "audio_message_id": pending.get("audio_message_id")}
+        pending_images[uid] = {"photo_file_id": photo.file_id, "audio_message_id": pending.get("audio_message_id")}
 
         audio = pending_entry["audio"]
-        job = pending_entry
+        job = dict(pending_entry)
         job["thumbnail_file_id"] = photo.file_id
         job["message"] = pending_entry["message"]
-        job["uid"] = message.from_user.id if message.from_user else 0
+        job["uid"] = pending_entry.get("owner_user_id", owner_id)
+        job["context_key"] = uid
         job["job_id"] = pending_entry["job_id"]
         job["segment_start"] = 0.0
 
-        pending_audio.pop(message.from_user.id, None)
-        pending_images.pop(message.from_user.id, None)
+        if not _is_group_context(uid):
+            await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
+        else:
+            original = job.get("message")
+            if original is not None:
+                await _edit_wizard_text(bot, uid, original, tr("MSG_IMAGE_RECEIVED", owner_id))
+        pending_audio.pop(uid, None)
+        pending_images.pop(uid, None)
 
         await start_job_worker(bot)
-        await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
         enqueue_job(job)
         return
 
@@ -2307,10 +2573,7 @@ async def on_speed_selected(callback, bot: Bot):
     await callback.answer(tr("MSG_SPEED_SAVED_ANSWER", user_id))
 
 
-@router.message(
-    (F.video | F.voice | F.document),
-    F.chat.type == ChatType.PRIVATE,
-)
+@router.message((F.video | F.voice | F.document), F.chat.type == "private")
 async def on_wrong_type(message: Message):
     uid = message.from_user.id if message.from_user else 0
     await message.reply(tr("MSG_WRONG_TYPE", uid))
@@ -2336,10 +2599,7 @@ async def on_pre_checkout(pre_checkout_query: PreCheckoutQuery, bot: Bot):
     await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
 
 
-@router.message(
-    F.successful_payment,
-    F.chat.type == ChatType.PRIVATE,
-)
+@router.message(F.successful_payment, F.chat.type == "private")
 async def on_successful_payment(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
     limits.activate_subscription(uid, config.STARS_SUBSCRIPTION_DAYS)
