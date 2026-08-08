@@ -61,7 +61,7 @@ VINYL_EMERALD_PATH = os.path.join(ASSETS_DIR, "vinyl_emerald.png")
 FRAME_SILVER_PATH = os.path.join(ASSETS_DIR, "frame_silver.png")
 # قطر القرص بعد تصغيره ليدخل بالكامل داخل الفتحة الداخلية للإطار الفضي.
 # 0.70 من 640 = 448px، مع ترك حافة فضية ظاهرة من جميع الجهات.
-FRAME_SILVER_DISC_RATIO = 0.80
+FRAME_SILVER_DISC_RATIO = 0.842
 
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
 
