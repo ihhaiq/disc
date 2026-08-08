@@ -45,6 +45,45 @@ def build_disc(thumb_path: str, vinyl_path: str, out_path: str,
     return out_path
 
 
+def build_disc_framed(thumb_path: str, out_path: str, size: int = 640,
+                       label_ratio: float = 0.74, disc_ratio: float = 0.77,
+                       base_color: tuple = (18, 18, 18)) -> str:
+    """
+    يبني قرص خاص بقالب "الإطار الكلاسيكي" (حلقة معدنية + ذراع، تُضاف لاحقًا
+    كطبقة ثابتة فوقه في processor.py تمامًا مثل shadow.png العادي — راجع
+    frame_path بالمعالج). بعكس build_disc() العادية، ما نستخدم أي ملف
+    "vinyl_*.png" هنا (القالب هذا ما عنده أخاديد/تدرّج مطبوع)؛ بدل هذا نبني
+    خلفية دائرية بسيطة بلون غامق تختفي بالكامل خلف حلقة الإطار، ثم نلصق
+    صورة الغلاف فوقها بحجم يغطي كامل الفتحة الشفافة بمنتصف الإطار بدون أي
+    فراغ أبيض (label_ratio) — القيمتان الافتراضيتان محسوبتان فعليًا من قياس
+    فتحة/حلقة قالب frame_classic.png نفسه، فلا تغيّرهما إلا لو بدّلت الصورة.
+    """
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+
+    disc_d = max(1, int(size * disc_ratio))
+    bg = Image.new("RGBA", (disc_d, disc_d), (0, 0, 0, 0))
+    ImageDraw.Draw(bg).ellipse((0, 0, disc_d, disc_d), fill=(*base_color, 255))
+    bg_pos = ((size - disc_d) // 2, (size - disc_d) // 2)
+    canvas.alpha_composite(bg, bg_pos)
+
+    label = Image.open(thumb_path).convert("RGBA")
+    w, h = label.size
+    m = min(w, h)
+    label = label.crop(((w - m) // 2, (h - m) // 2, (w - m) // 2 + m, (h - m) // 2 + m))
+
+    label_d = max(1, int(size * label_ratio))
+    label = label.resize((label_d, label_d))
+    mask = Image.new("L", (label_d, label_d), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, label_d, label_d), fill=255)
+    label.putalpha(mask)
+
+    label_pos = ((size - label_d) // 2, (size - label_d) // 2)
+    canvas.alpha_composite(label, label_pos)
+
+    canvas.save(out_path)
+    return out_path
+
+
 def build_album_cover(thumb_path: str, out_path: str, size: int,
                        corner_ratio: float = 0.06) -> str:
     """
