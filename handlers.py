@@ -776,7 +776,7 @@ def get_developer_vinyl_path(user_id: int) -> str:
     if choice == "rose" :
         return config.VINYL_ROSE_PATH
     if choice == "emerald" :
-        return == config.VINYL_EMERALD_PATH
+        return config.VINYL_EMERALD_PATH
     return config.VINYL_PATH
 
 
