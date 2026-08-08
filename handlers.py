@@ -756,17 +756,6 @@ def get_developer_shadow_path(user_id: int) -> str:
     return config.SHADOW_PATH
 
 
-def get_developer_frame_path(user_id: int) -> str | None:
-    """
-    مسار طبقة "إطار" إضافية تُلصق فوق صورة الغلاف داخل ثقب القرص.
-    None يعني بدون إطار (الوضع الافتراضي لكل الألوان ما عدا ROSE حاليًا).
-    """
-    choice = developer_vinyl_choice.get(user_id)
-    if choice == "rose":
-        return config.FRAME_ROSE_PATH
-    return None
-
-
 def get_job_priority(user_id: int) -> int:
     return 0 if user_id and user_id == config.DEVELOPER_ID else 1
 
@@ -842,10 +831,14 @@ async def process_job(bot: Bot, job: dict) -> None:
 
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
         animator.set_stage(tr("STAGE_BUILDING_DISC", uid))
+        # ⛔️ حُذفت خطوة "الإطار الإضافية" (frame) هنا. build_disc بملف compose.py
+        # يقبل فقط (thumb_path, vinyl_path, out_path, hole_ratio, size)، وكانت
+        # هذه الدالة تُستدعى بمعامل سادس إضافي (get_developer_frame_path) غير
+        # موجود بتوقيع build_disc إطلاقًا، فكان هذا يفشّل كل عملية بناء قرص
+        # بخطأ TypeError. الآن الاستدعاء مطابق تمامًا لتوقيع compose.build_disc.
         await asyncio.to_thread(
             build_disc, thumb_path, get_developer_vinyl_path(uid), disc_path,
             config.HOLE_RATIO, config.DISC_SIZE,
-            get_developer_frame_path(uid),
         )
 
         animator.set_stage(tr("STAGE_RENDERING_VIDEO", uid), percent=0)
