@@ -99,13 +99,34 @@ JOB_TIMEOUT_SECONDS = 8 * 60
 # بدون أي تكرار كود — هذا هو سبب "التماسك" المطلوب.
 CHANNEL_KEY_PREFIX = "c"
 
+# نفس فكرة القنوات بالضبط، لكن للمجموعات/السوبرگروبات: مفتاح مركّب فريد
+# (chat_id + message_id) بدل uid حقيقي، عشان ما يصير تصادم لو نفس الشخص
+# عنده أكثر من طلب متزامن بمجموعات مختلفة أو بالخاص بنفس الوقت. الفرق
+# الوحيد عن القنوات: بالمجموعة "صاحب الصوت الأصلي" يقدر يتحكم بالأزرار
+# هو نفسه (مو بس الأدمن)، لأن بالمجموعة الشخص العادي هو اللي يرسل الصوت
+# (بعكس القناة اللي المنشور فيها منسوب للقناة نفسها مو لعضو معيّن).
+GROUP_KEY_PREFIX = "g"
+
 
 def _channel_key(chat_id: int, message_id: int) -> str:
     return f"{CHANNEL_KEY_PREFIX}{chat_id}:{message_id}"
 
 
+def _group_key(chat_id: int, message_id: int) -> str:
+    return f"{GROUP_KEY_PREFIX}{chat_id}:{message_id}"
+
+
 def _is_channel_context(uid) -> bool:
     return isinstance(uid, str) and uid.startswith(CHANNEL_KEY_PREFIX)
+
+
+def _is_group_context(uid) -> bool:
+    return isinstance(uid, str) and uid.startswith(GROUP_KEY_PREFIX)
+
+
+def _is_shared_context(uid) -> bool:
+    """سياق قناة أو مجموعة (بعكس محادثة خاصة عادية بمفتاح int)."""
+    return _is_channel_context(uid) or _is_group_context(uid)
 
 
 def _with_channel_suffix(callback_data: str, channel_chat_id: int | None, channel_message_id: int | None) -> str:
@@ -145,12 +166,31 @@ async def _is_channel_controller(bot: Bot, chat_id: int, user_id: int) -> bool:
 async def resolve_callback_uid(callback, bot: Bot) -> tuple[str, int | None, int | None] | None:
     """
     يحلل callback.data ويرجع (base_data, uid, channel_chat_id) حيث uid ممكن يكون
-    int (زر بالخاص) أو str مركّب (زر بسياق قناة). يرجع None ويرد على callback
-    برسالة رفض تلقائيًا لو الضاغط مو أدمن بالقناة.
+    int (زر بالخاص) أو str مركّب (زر بسياق قناة/مجموعة). يرجع None ويرد على
+    callback برسالة رفض تلقائيًا لو الضاغط ما يملك صلاحية التحكم.
+
+    - قناة: أدمن/مالك القناة فقط.
+    - مجموعة: صاحب الصوت الأصلي (اللي أرسله) أو أي أدمن بالمجموعة.
     """
     base, ch_chat, ch_msg = _split_channel_suffix(callback.data)
     if ch_chat is not None:
         presser_id = callback.from_user.id if callback.from_user else 0
+        chat_type = callback.message.chat.type if callback.message else None
+
+        if chat_type in ("group", "supergroup"):
+            key = _group_key(ch_chat, ch_msg)
+            pending = pending_audio.get(key)
+            original_sender_id = None
+            if pending:
+                original_message = pending.get("message")
+                if original_message is not None and original_message.from_user:
+                    original_sender_id = original_message.from_user.id
+            is_owner = original_sender_id is not None and presser_id == original_sender_id
+            if not is_owner and not await _is_channel_controller(bot, ch_chat, presser_id):
+                await callback.answer(texts_module.MSG_CHANNEL_ADMIN_ONLY, show_alert=True)
+                return None
+            return base, key, ch_chat
+
         if not await _is_channel_controller(bot, ch_chat, presser_id):
             await callback.answer(texts_module.MSG_CHANNEL_ADMIN_ONLY, show_alert=True)
             return None
@@ -807,6 +847,8 @@ async def process_job(bot: Bot, job: dict) -> None:
     animator = StatusAnimator(status, bot, uid)
     animator.start()
 
+    duration_warning_msg: Message | None = None
+
     try:
         await bot.send_chat_action(message.chat.id, action=ChatAction.RECORD_VIDEO_NOTE)
         animator.set_stage(tr("STAGE_DOWNLOADING_AUDIO", uid))
@@ -827,7 +869,9 @@ async def process_job(bot: Bot, job: dict) -> None:
 
         duration = await get_duration(audio_path)
         if duration > config.MAX_DURATION_SECONDS and not job.get("segment_start"):
-            await reply_with_premium_emoji(message, tr("MSG_DURATION_TOO_LONG_FMT", uid).format(duration=duration))
+            duration_warning_msg = await reply_with_premium_emoji(
+                message, tr("MSG_DURATION_TOO_LONG_FMT", uid).format(duration=duration)
+            )
 
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
         animator.set_stage(tr("STAGE_BUILDING_DISC", uid))
@@ -861,10 +905,10 @@ async def process_job(bot: Bot, job: dict) -> None:
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
 
         final_keyboard = None
-        if _is_channel_context(uid):
+        if _is_shared_context(uid):
             final_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(
-                    text=f"{CHANNEL_RESULT_EMOJI} make with love",
+                    text=f"{CHANNEL_RESULT_EMOJI} كيف اسوي وحدة مثل هذي؟",
                     url=CHANNEL_RESULT_URL,
                     style="danger",
                 )
@@ -873,17 +917,18 @@ async def process_job(bot: Bot, job: dict) -> None:
         try:
             await message.reply_video_note(FSInputFile(out_path), length=config.DISC_SIZE, reply_markup=final_keyboard)
         except TelegramBadRequest as e:
-            if _is_channel_context(uid) and ("rights" in str(e).lower() or "administrator" in str(e).lower()):
+            if _is_shared_context(uid) and ("rights" in str(e).lower() or "administrator" in str(e).lower()):
+                place_label = "القناة" if _is_channel_context(uid) else "المجموعة"
                 await notify_missing_channel_permission(
-                    bot, message.chat.id, message.chat.title or "القناة",
-                    "نشر فيديو/رسائل بالقناة (صلاحية Post Messages).",
+                    bot, message.chat.id, message.chat.title or place_label,
+                    f"نشر فيديو/رسائل بـ{place_label} (صلاحية Post Messages).",
                 )
                 return
             raise
 
         # تنظيف رسائل البوت الوسيطة (اختيار الوضع + خطوات الـ Wizard) بسياق
-        # القناة فقط — ما نلمس منشور الصوت الأصلي للمستخدم إطلاقًا.
-        if _is_channel_context(uid):
+        # القناة/المجموعة فقط — ما نلمس منشور/رسالة الصوت الأصلية للمستخدم إطلاقًا.
+        if _is_shared_context(uid):
             for msg_id in job.get("channel_msg_ids", []):
                 try:
                     await bot.delete_message(message.chat.id, msg_id)
@@ -923,6 +968,14 @@ async def process_job(bot: Bot, job: dict) -> None:
             await status.delete()
         except Exception:
             pass
+        # رسالة "الملف أطول من المسموح" (وفيها إشارة لتغيير اللغة للإنكليزية
+        # عبر زر 🌐) ما نحتاجها بعد انتهاء المهمة — نحذفها تلقائيًا حتى لا
+        # تضل عالقة بالمحادثة.
+        if duration_warning_msg is not None:
+            try:
+                await duration_warning_msg.delete()
+            except Exception:
+                pass
 
 
 def build_speed_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -1763,10 +1816,15 @@ async def on_mode_custom(callback, bot: Bot):
 
 
 def _channel_ctx(uid) -> tuple[int | None, int | None]:
-    """يستخرج (chat_id, message_id) من مفتاح سياق القناة، أو (None, None) لو مو سياق قناة."""
-    if not _is_channel_context(uid):
+    """
+    يستخرج (chat_id, message_id) من مفتاح سياق القناة أو المجموعة، أو
+    (None, None) لو مو سياق مشترك (يعني محادثة خاصة بمفتاح uid عادي).
+    البادئتان (CHANNEL_KEY_PREFIX و GROUP_KEY_PREFIX) بحرف واحد بالضبط،
+    فنفس منطق القص (uid[1:]) يشتغل لكلتيهما.
+    """
+    if not _is_shared_context(uid):
         return None, None
-    rest = uid[len(CHANNEL_KEY_PREFIX):]
+    rest = uid[1:]
     chat_str, _, msg_str = rest.partition(":")
     try:
         return int(chat_str), int(msg_str)
@@ -1932,7 +1990,7 @@ async def _wiz_advance_to_segment_or_finish(bot: Bot, uid, target_message: Messa
         tr("MSG_WIZ_CHOOSE_SEGMENT", uid),
         reply_markup=build_wiz_segment_keyboard(total_duration, uid, ch_chat, ch_msg),
     )
-    if _is_channel_context(uid) and sent is not None and sent.message_id not in pending.get("channel_msg_ids", []):
+    if _is_shared_context(uid) and sent is not None and sent.message_id not in pending.get("channel_msg_ids", []):
         pending.setdefault("channel_msg_ids", []).append(sent.message_id)
 
 
@@ -1965,7 +2023,7 @@ async def _finish_wizard(bot: Bot, uid, send_func, segment_start: float) -> None
     else:
         sent = await send_func(starting_text)
 
-    if _is_channel_context(uid) and sent is not None:
+    if _is_shared_context(uid) and sent is not None:
         job.setdefault("channel_msg_ids", [])
         if sent.message_id not in job["channel_msg_ids"]:
             job["channel_msg_ids"].append(sent.message_id)
