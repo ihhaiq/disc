@@ -1250,7 +1250,8 @@ def build_customize_keyboard(user_id: int) -> InlineKeyboardMarkup:
     current = get_user_rotation_seconds(user_id)
     labels = [
         (tr("SPEED_LABEL_FULL", user_id), "full"),
-        (tr("SPEED_LABEL_8RPM", user_id), "8"),
+        (tr("SPEED_LABEL_8RPM", user_id), "8"),        
+        (tr("SPEED_LABEL_45RPM", user_id), "19),
         (tr("SPEED_LABEL_33RPM", user_id), "33"),
         (tr("SPEED_LABEL_45RPM", user_id), "45"),
     ]
@@ -1267,6 +1268,7 @@ def build_customize_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         buttons[:2],
         buttons[2:4],
+        buttons[4:6],
         [InlineKeyboardButton(
             text=tr("BTN_VINYL_COLOR_MENU", user_id),
             callback_data="vinyl_menu:open",
@@ -2433,6 +2435,7 @@ def build_wiz_speed_keyboard(user_id: int = 0, channel_chat_id: int | None = Non
     labels = [
         (tr("SPEED_LABEL_FULL", user_id), "full"),
         (tr("SPEED_LABEL_8RPM", user_id), "8"),
+        (tr("SPEED_LABEL_19RPM", user_id), "19),
         (tr("SPEED_LABEL_33RPM", user_id), "33"),
         (tr("SPEED_LABEL_45RPM", user_id), "45"),
     ]
@@ -2443,7 +2446,9 @@ def build_wiz_speed_keyboard(user_id: int = 0, channel_chat_id: int | None = Non
         )
         for label, value in labels
     ]
-    return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        buttons[:2], buttons[2:4],[buttons[4:6],
+    ])
 
 
 def build_wiz_image_keyboard(has_thumbnail: bool, user_id: int = 0, channel_chat_id: int | None = None,
