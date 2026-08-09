@@ -1379,11 +1379,11 @@ VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
 async def send_vinyl_color_gallery(bot: Bot, chat_id: int, user_id: int = 0,
                                     reply_to_message_id: int | None = None) -> None:
     """
-    يرسل معاينة كل قوالب الأقراص المتاحة بنمط كاروسيل (Rich Message
-    Slideshow — وسم <tg-slideshow> بتليكرام)، بحيث يقدر المستخدم يسحب
-    بين الصور بدل ما توصله كألبوم صور منفصلة. كل صورة تحمل اسم اللون
-    كـ caption. حد تليكرام لعدد عناصر الـ slideshow هو 10، فنقسّم
-    القائمة لدفعات (رسالة كاروسيل لكل دفعة) لو تجاوزت.
+    يرسل معاينة كل قوالب الأقراص المتاحة بنمط كاروسيل واحد (Rich Message
+    Slideshow — وسم <tg-slideshow> بتليكرام)، بحيث يقدر المستخدم يسحب بين
+    كل الصور برسالة وحدة بدل ما توصله كألبومات منفصلة. كل صورة تحمل اسم
+    اللون كـ caption. لا يوجد حد موثّق لعدد عناصر الـ slideshow (بخلاف
+    Media Group العادية المحدودة بـ10)، فنرسلها كلها برسالة واحدة.
     """
     items: list[tuple[str, str]] = []  # (path, label)
     for value, text_var in VINYL_COLOR_CHOICES:
@@ -1394,26 +1394,22 @@ async def send_vinyl_color_gallery(bot: Bot, chat_id: int, user_id: int = 0,
     if not items:
         return
 
-    chunk_size = 10
-    for i in range(0, len(items), chunk_size):
-        chunk = items[i:i + chunk_size]
-        slides = [
-            InputRichBlockPhoto(
-                photo=InputMediaPhoto(media=FSInputFile(path)),
-                caption=RichBlockCaption(text=label),
-            )
-            for path, label in chunk
-        ]
-        slideshow_block = InputRichBlockSlideshow(blocks=slides)
-        try:
-            await send_rich_message(
-                bot, chat_id,
-                blocks=[slideshow_block],
-                reply_to_message_id=reply_to_message_id if i == 0 else None,
-            )
-        except Exception:
-            logger.exception("فشل إرسال معاينة الألوان بنمط الكاروسيل")
-            return
+    slides = [
+        InputRichBlockPhoto(
+            photo=InputMediaPhoto(media=FSInputFile(path)),
+            caption=RichBlockCaption(text=label),
+        )
+        for path, label in items
+    ]
+    slideshow_block = InputRichBlockSlideshow(blocks=slides)
+    try:
+        await send_rich_message(
+            bot, chat_id,
+            blocks=[slideshow_block],
+            reply_to_message_id=reply_to_message_id,
+        )
+    except Exception:
+        logger.exception("فشل إرسال معاينة الألوان بنمط الكاروسيل")
 
 
 def user_has_premium_access(user_id: int) -> bool:
