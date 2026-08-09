@@ -14,7 +14,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import (
     Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
     LabeledPrice, PreCheckoutQuery, MessageEntity,
-    InputRichMessage, ReplyParameters,
+    InputRichMessage, ReplyParameters, InputMediaPhoto,
 )
 
 from compose import build_disc
