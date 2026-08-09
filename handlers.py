@@ -362,7 +362,7 @@ CHANNEL_RESULT_EMOJI = "💌"
 # دعم إيموجي بريميوم (Telegram Premium Custom Emoji)
 # ============================================================
 PREMIUM_EMOJI_IDS = {
-    "emerald": "5285265490350972397",
+    "emerald": "5285265490350972397", "koi": "5339487433828353468", "kiss": "5474525960143385880"
 }
 USE_PREMIUM_EMOJI = bool(PREMIUM_EMOJI_IDS)
 
@@ -952,6 +952,10 @@ def get_developer_vinyl_path(user_id: int, choice_override: str | None = None) -
         return config.VINYL_ROSE_PATH
     if choice == "emerald" :
         return config.VINYL_EMERALD_PATH
+    if choice == "koi":
+        return config.VINYL_KOI_PATH
+    if choics == "kiss":
+        return config.VINYL_KISS_PATH
     return config.VINYL_PATH
 
 
