@@ -1319,7 +1319,7 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
 
     def btn_style(value: str) -> str:
         is_selected = current == value or (current is None and value == "default")
-        return "success" if is_selected else "primary"
+        return "success" if is_selected else "default"
 
     return InlineKeyboardMarkup(inline_keyboard=[
     [
