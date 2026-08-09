@@ -46,31 +46,6 @@ def build_disc(thumb_path: str, vinyl_path: str, out_path: str,
 
 
 
-def resize_disc_for_frame(
-    disc_path: str,
-    out_path: str,
-    ratio: float = 0.70,
-    size: int = 640,
-) -> str:
-    """
-    يصغّر القرص النهائي (القرص + صورة الغلاف) معًا ثم يضعه في منتصف
-    مساحة الفيديو. الإطار نفسه لا يدخل هنا؛ يضاف لاحقًا كطبقة ثابتة
-    في processor.py.
-    """
-    disc = Image.open(disc_path).convert("RGBA")
-    if disc.size != (size, size):
-        disc = disc.resize((size, size), Image.Resampling.LANCZOS)
-
-    disc_size = max(1, int(size * ratio))
-    disc = disc.resize((disc_size, disc_size), Image.Resampling.LANCZOS)
-
-    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    x = (size - disc_size) // 2
-    y = (size - disc_size) // 2
-    canvas.alpha_composite(disc, (x, y))
-    canvas.save(out_path)
-    return out_path
-
 def build_album_cover(thumb_path: str, out_path: str, size: int,
                        corner_ratio: float = 0.06) -> str:
     """

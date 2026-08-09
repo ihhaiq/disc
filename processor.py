@@ -56,8 +56,7 @@ async def render_vinyl(disc_path: str, shadow_path: str, audio_path: str,
                         size: int = 640, fps: int = 30,
                         max_duration: float = 60.0,
                         start_offset: float = 0.0,
-                        on_progress: ProgressCallback | None = None,
-                        frame_path: str | None = None) -> str:
+                        on_progress: ProgressCallback | None = None) -> str:
     full_duration = await get_duration(audio_path)
     # نتأكد أن نقطة البداية المختارة ضمن حدود الملف الفعلية
     start_offset = max(0.0, min(start_offset, max(0.0, full_duration - 1)))
@@ -86,31 +85,17 @@ async def render_vinyl(disc_path: str, shadow_path: str, audio_path: str,
     if trim_proc.returncode != 0:
         raise RuntimeError(f"ffmpeg trim failed: {trim_err.decode()[-500:]}")
 
-    if frame_path:
-        filt = (
-            f"[1:v]format=rgba,"
-            f"rotate=2*PI*t/{rotation_seconds}:c=none:ow={size}:oh={size}[spin];"
-            f"[spin][2:v]overlay=0:0:format=auto[with_shadow];"
-            f"[with_shadow][3:v]overlay=0:0:format=auto[vout]"
-        )
-    else:
-        filt = (
-            f"[1:v]format=rgba,"
-            f"rotate=2*PI*t/{rotation_seconds}:c=none:ow={size}:oh={size}[spin];"
-            f"[spin][2:v]overlay=0:0:format=auto[vout]"
-        )
+    filt = (
+        f"[1:v]format=rgba,"
+        f"rotate=2*PI*t/{rotation_seconds}:c=none:ow={size}:oh={size}[spin];"
+        f"[spin][2:v]overlay=0:0:format=auto[vout]"
+    )
 
     cmd = [
         "ffmpeg", "-y",
         "-i", trimmed_audio_path,
         "-loop", "1", "-i", disc_path,
         "-loop", "1", "-i", shadow_path,
-    ]
-
-    if frame_path:
-        cmd += ["-loop", "1", "-i", frame_path]
-
-    cmd += [
         "-filter_complex", filt,
         "-map", "[vout]", "-map", "0:a",
         "-c:v", "libx264", "-preset", "veryfast",
