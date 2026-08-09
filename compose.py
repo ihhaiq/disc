@@ -45,6 +45,40 @@ def build_disc(thumb_path: str, vinyl_path: str, out_path: str,
     return out_path
 
 
+def build_disc_static_preview(thumb_path: str, vinyl_path: str, shadow_path: str,
+                               out_path: str, hole_ratio: float = 0.44,
+                               size: int = 640) -> str:
+    """
+    يبني صورة ثابتة تمثّل الشكل النهائي الفعلي للقرص كما يظهر بالفيديو
+    (نفس ما يسويه processor.py وقت التصدير، بس لإطار واحد ثابت بزاوية
+    دوران صفر): القالب + صورة الغلاف ملصوقة داخل الثقب (عبر build_disc)،
+    ثم الظل المخصص لنفس اللون يُركّب فوقها بنفس ترتيب overlay بالفيديو
+    (shadow فوق disc). تُستخدم لمعاينة الألوان (الكاروسيل) بدل عرض
+    القالب الفارغ وحده.
+    """
+    build_disc(thumb_path, vinyl_path, out_path, hole_ratio, size)
+
+    disc = Image.open(out_path).convert("RGBA")
+    shadow = Image.open(shadow_path).convert("RGBA")
+    if shadow.size != disc.size:
+        shadow = shadow.resize(disc.size)
+
+    disc.alpha_composite(shadow, (0, 0))
+    disc.save(out_path)
+    return out_path
+
+
+def build_placeholder_square(out_path: str, size: int = 640,
+                              fill: tuple[int, int, int, int] = (60, 60, 66, 255)) -> str:
+    """
+    يبني صورة مربعة بلون خالٍ تُستخدم بدل صورة الغلاف عند عدم توفر أي
+    صورة حقيقية (لا صورة مستخدم ولا صورة بوت) — تفادي انهيار build_disc
+    اللي يتوقع مسار صورة فعلي.
+    """
+    placeholder = Image.new("RGBA", (size, size), fill)
+    placeholder.save(out_path)
+    return out_path
+
 
 def build_album_cover(thumb_path: str, out_path: str, size: int,
                        corner_ratio: float = 0.06) -> str:

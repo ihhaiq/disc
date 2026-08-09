@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
+from aiogram.exceptions import TelegramRetryAfter
 import config
 from handlers import router, load_custom_texts_into_memory
 from help_builder import router as help_router          # ← جديد
@@ -65,7 +66,21 @@ async def main():
     dp = Dispatcher()
     dp.include_router(help_router)   # ← جديد، لازم قبل router العام
     dp.include_router(router)
-    await bot.delete_webhook(drop_pending_updates=True)
+    # لا نخلي فشل هذا الاستدعاء يطيح بكل البوت: لو تليكرام رجّع flood control
+    # (مثلاً بسبب ريستارتات متكررة بفترة قصيرة)، البرنامج كان ينهار بالكامل،
+    # و Railway يعيد التشغيل فورًا فيرتطم بنفس الحظر من جديد بحلقة لا نهائية.
+    # هنا نكتفي بتسجيل تحذير والمتابعة مباشرة لبدء الـ polling، لأن
+    # drop_pending_updates مجرد تنظيف اختياري مو ضروري لعمل البوت.
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except TelegramRetryAfter as exc:
+        logger.warning(
+            "تعذّر حذف الـ webhook بسبب flood control (retry after %s ثانية)، "
+            "متابعة بدون حذفه",
+            exc.retry_after,
+        )
+    except Exception:
+        logger.exception("تعذّر حذف الـ webhook، متابعة تشغيل البوت بدون هذي الخطوة")
     logging.info(LOG_BOT_RUNNING)
     await dp.start_polling(bot)
 

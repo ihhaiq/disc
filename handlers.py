@@ -18,7 +18,7 @@ from aiogram.types import (
     InputRichBlockSlideshow, InputRichBlockPhoto, RichBlockCaption,
 )
 
-from compose import build_disc
+from compose import build_disc, build_disc_static_preview, build_placeholder_square
 from processor import get_duration, render_vinyl, render_preview
 import config
 import limits
@@ -367,7 +367,7 @@ CHANNEL_RESULT_EMOJI = "💌"
 # دعم إيموجي بريميوم (Telegram Premium Custom Emoji)
 # ============================================================
 PREMIUM_EMOJI_IDS = {
-    "emerald": "5285265490350972397", "koi": "6035180962214583541", "kiss": "5474525960143385880", "ali": "5460737770798489825", "black" : "5399878127163811970"
+    "emerald": "5285265490350972397", "koi": "5339487433828353468", "kiss": "5474525960143385880", "ali": "5460737770798489825", "black" : "5399878127163811970"
 }
 USE_PREMIUM_EMOJI = bool(PREMIUM_EMOJI_IDS)
 
@@ -1376,40 +1376,99 @@ VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
 ]
 
 
+async def _get_gallery_sample_thumb_path(bot: Bot, user_id: int) -> str:
+    """
+    يجيب صورة عيّنة توضع بوسط كل قوالب معاينة الألوان: يجرّب أول صورة
+    بروفايل المستخدم الحالي، ولو ما عنده يجرّب صورة بروفايل البوت نفسه،
+    ولو ما لقى أي صورة (نادر) يرجع مربع لوني بسيط بدل ما ينهار.
+    الملف يُحمّل لمسار مؤقت بـ TEMP_DIR ومسؤولية الاستدعاء حذفه بعدها.
+    """
+    dest = os.path.join(config.TEMP_DIR, f"gallery_sample_{uuid.uuid4().hex}.jpg")
+
+    for target_id in filter(None, [user_id, None]):
+        try:
+            if target_id:
+                photos = await bot.get_user_profile_photos(target_id, limit=1)
+            else:
+                me = await bot.get_me()
+                photos = await bot.get_user_profile_photos(me.id, limit=1)
+            if photos and photos.photos:
+                file_id = photos.photos[0][-1].file_id
+                await download_with_retries(bot, file_id, dest, timeout_seconds=30, retries=2)
+                return dest
+        except Exception:
+            logger.warning("تعذّر جلب صورة عيّنة (user_id=%s) لمعاينة الألوان", target_id)
+
+    await asyncio.to_thread(build_placeholder_square, dest, config.DISC_SIZE)
+    return dest
+
+
 async def send_vinyl_color_gallery(bot: Bot, chat_id: int, user_id: int = 0,
                                     reply_to_message_id: int | None = None) -> None:
     """
     يرسل معاينة كل قوالب الأقراص المتاحة بنمط كاروسيل واحد (Rich Message
     Slideshow — وسم <tg-slideshow> بتليكرام)، بحيث يقدر المستخدم يسحب بين
-    كل الصور برسالة وحدة بدل ما توصله كألبومات منفصلة. كل صورة تحمل اسم
-    اللون كـ caption. لا يوجد حد موثّق لعدد عناصر الـ slideshow (بخلاف
-    Media Group العادية المحدودة بـ10)، فنرسلها كلها برسالة واحدة.
+    كل الصور برسالة وحدة بدل ما توصله كألبومات منفصلة.
+
+    كل صورة بالكاروسيل هي الشكل النهائي الفعلي (القالب + الظل المخصص له
+    + صورة موضوعة داخل الثقب ومقصوصة/جالبة زي التصدير الحقيقي بالضبط)،
+    مو القالب الفارغ. الصورة الموضوعة بالثقب هي صورة بروفايل المستخدم
+    الحالي لو متوفرة، وإلا صورة بروفايل البوت.
     """
-    items: list[tuple[str, str]] = []  # (path, label)
+    items: list[tuple[str, str, str, str]] = []  # (value, vinyl_path, shadow_path, label)
     for value, text_var in VINYL_COLOR_CHOICES:
-        path = get_developer_vinyl_path(0, value)
-        if os.path.exists(path):
-            items.append((path, tr(text_var, user_id) or value))
+        vinyl_path = get_developer_vinyl_path(0, value)
+        shadow_path = get_developer_shadow_path(0, value)
+        if os.path.exists(vinyl_path) and os.path.exists(shadow_path):
+            items.append((value, vinyl_path, shadow_path, tr(text_var, user_id) or value))
 
     if not items:
         return
 
-    slides = [
-        InputRichBlockPhoto(
-            photo=InputMediaPhoto(media=FSInputFile(path)),
-            caption=RichBlockCaption(text=label),
-        )
-        for path, label in items
-    ]
-    slideshow_block = InputRichBlockSlideshow(blocks=slides)
+    sample_thumb_path = await _get_gallery_sample_thumb_path(bot, user_id)
+    preview_paths: list[str] = []
+    labels: list[str] = []
     try:
-        await send_rich_message(
-            bot, chat_id,
-            blocks=[slideshow_block],
-            reply_to_message_id=reply_to_message_id,
-        )
-    except Exception:
-        logger.exception("فشل إرسال معاينة الألوان بنمط الكاروسيل")
+        for value, vinyl_path, shadow_path, label in items:
+            out_path = os.path.join(config.TEMP_DIR, f"gallery_preview_{uuid.uuid4().hex}.png")
+            try:
+                await asyncio.to_thread(
+                    build_disc_static_preview,
+                    sample_thumb_path, vinyl_path, shadow_path, out_path,
+                    get_developer_hole_ratio(value), config.DISC_SIZE,
+                )
+            except Exception:
+                logger.exception("فشل بناء معاينة اللون %s للكاروسيل", label)
+                continue
+            preview_paths.append(out_path)
+            labels.append(label)
+
+        if not preview_paths:
+            return
+
+        slides = [
+            InputRichBlockPhoto(
+                photo=InputMediaPhoto(media=FSInputFile(path)),
+                caption=RichBlockCaption(text=label),
+            )
+            for path, label in zip(preview_paths, labels)
+        ]
+        slideshow_block = InputRichBlockSlideshow(blocks=slides)
+        try:
+            await send_rich_message(
+                bot, chat_id,
+                blocks=[slideshow_block],
+                reply_to_message_id=reply_to_message_id,
+            )
+        except Exception:
+            logger.exception("فشل إرسال معاينة الألوان بنمط الكاروسيل")
+    finally:
+        for path in preview_paths + [sample_thumb_path]:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
 
 
 def user_has_premium_access(user_id: int) -> bool:
