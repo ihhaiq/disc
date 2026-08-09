@@ -285,8 +285,8 @@ BTN_VINYL_ROSE = "ROSE💮"
 BTN_VINYL_GREEN = "اخضر تجريبي"
 BTN_VINYL_BLOODY = "🩸"
 BTN_VINYL_EMERALD = "EMERALD"
-BTN_VINYL_KOI = "🎏 KOI"
-BTN_VINYL_KISS = "💋 KISS"
+BTN_VINYL_KOI = "KOI"
+BTN_VINYL_KISS = "KISS"
 BTN_BACK = "🔙 رجوع"
 
 SPEED_LABEL_FULL = "دورة كاملة"
@@ -378,8 +378,8 @@ TEXTS_EN: dict[str, str] = {
     "BTN_VINYL_GREEN": "Green (beta)",
     "BTN_VINYL_BLOODY": "🩸",
     "BTN_VINYL_ROSE" : "💮 ROSE",
-    "BTN_VINYL_KOI": "🎏 KOI",
-    "BTN_VINYL_KISS": "💋 KISS",
+    "BTN_VINYL_KOI": "KOI",
+    "BTN_VINYL_KISS": "KISS",
     "BTN_BACK": "🔙 Back",
     "SPEED_LABEL_FULL": "Full turn",
     "SPEED_LABEL_8RPM": "8 RPM",
