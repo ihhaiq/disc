@@ -57,7 +57,8 @@ VINYL_BLOODY_PATH = os.path.join(ASSETS_DIR, "vinyl_bloody.png")
 VINYL_ROSE_PATH = os.path.join(ASSETS_DIR, "vinyl_rose.png")
 SHADOW_ROSE_PATH = os.path.join(ASSETS_DIR, "shadow_rose.png")
 VINYL_EMERALD_PATH = os.path.join(ASSETS_DIR, "vinyl_emerald.png")
-
+VINYL_KOI_PATH = os.path.join(ASSETS_DIR, "vinyl_koi.png")
+VINYL_KISS_PATH = os.path.join(ASSETS_DIR, "vinyl_kiss.png")
 FRAME_SILVER_PATH = os.path.join(ASSETS_DIR, "frame_silver.png")
 # قطر القرص بعد تصغيره ليدخل بالكامل داخل الفتحة الداخلية للإطار الفضي.
 # 0.70 من 640 = 448px، مع ترك حافة فضية ظاهرة من جميع الجهات.
