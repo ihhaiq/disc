@@ -304,6 +304,7 @@ BTN_VINYL_EMERALD = "EMERALD"
 BTN_VINYL_KOI = "KOI"
 BTN_VINYL_KISS = "KISS"
 BTN_BACK = "🔙 رجوع"
+BTN_VINYL_AIL "علي رشم"
 
 SPEED_LABEL_FULL = "دورة كاملة"
 SPEED_LABEL_8RPM = "8 RPM"
@@ -396,6 +397,7 @@ TEXTS_EN: dict[str, str] = {
     "BTN_VINYL_ROSE" : "💮 ROSE",
     "BTN_VINYL_KOI": "KOI",
     "BTN_VINYL_KISS": "KISS",
+    "BTN_VINYL_ALI": "ALI",
     "BTN_BACK": "🔙 Back",
     "SPEED_LABEL_FULL": "Full turn",
     "SPEED_LABEL_8RPM": "8 RPM",
