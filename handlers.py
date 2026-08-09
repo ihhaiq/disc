@@ -977,9 +977,9 @@ def get_developer_shadow_path(user_id: int, choice_override: str | None = None) 
     if choice == "emerald" :
         return config.SHADOW_ROSE_PATH
     if choice == "koi":
-        return config.SHADOW_KOI_PATH
+        return config.SHADOW_ROSE_PATH
     if choice == "kiss":
-        return config.SHADOW_KISS_PATH
+        return config.SHADOW_ROSE_PATH
     return config.SHADOW_PATH
 
 
