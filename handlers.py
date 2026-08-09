@@ -2435,7 +2435,7 @@ def build_wiz_speed_keyboard(user_id: int = 0, channel_chat_id: int | None = Non
     labels = [
         (tr("SPEED_LABEL_FULL", user_id), "full"),
         (tr("SPEED_LABEL_8RPM", user_id), "8"),
-        (tr("SPEED_LABEL_19RPM", user_id), "19),
+        (tr("SPEED_LABEL_19RPM", user_id), "19"),
         (tr("SPEED_LABEL_33RPM", user_id), "33"),
         (tr("SPEED_LABEL_45RPM", user_id), "45"),
     ]
