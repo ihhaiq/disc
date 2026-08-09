@@ -2741,95 +2741,99 @@ def build_wiz_color_keyboard(
 
     has_premium = user_has_premium_access(user_id)
 
-    def wiz_label(var_name: str, value: str) -> str:
-        text = tr(var_name, user_id)
-        if limits.is_premium_color(value) and not has_premium:
-            return f"🔒 {text}"
-        return text
+def btn_style(value: str) -> str:
+    selected = current == value or (current is None and value == "default")
+    return "success" if selected else "default"
 
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_BLACK", "default"),
-                callback_data=cb("wiz_color:default"),
-                style="primary"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_PINK", "pink"),
-                callback_data=cb("wiz_color:pink"),
-                style="primary"
-            ),
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_BLUE", "blue"),
-                callback_data=cb("wiz_color:blue"),
-                style="primary"
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_YELLOW", "yellow"),
-                callback_data=cb("wiz_color:yellow"),
-                style="primary"
-            ),
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_RED", "red"),
-                callback_data=cb("wiz_color:red"),
-                style="primary"
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_GREEN", "green"),
-                callback_data=cb("wiz_color:green"),
-                style="primary"
-            ),
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_BLOODY", "bloody"),
-                callback_data=cb("wiz_color:bloody"),
-                style="primary"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_EMERALD", "emerald"),
-                callback_data=cb("wiz_color:emerald"),
-                style="primary",
-                icon_custom_emoji_id=PREMIUM_EMOJI_IDS["emerald"],
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_ROSE", "rose"),
-                callback_data=cb("wiz_color:rose"),
-                style="primary"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_KOI", "koi"),
-                callback_data=cb("wiz_color:koi"),
-                style="primary",
-                icon_custom_emoji_id=PREMIUM_EMOJI_IDS["koi"],
-            ),
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_KISS", "kiss"),
-                callback_data=cb("wiz_color:kiss"),
-                style="primary",
-                icon_custom_emoji_id=PREMIUM_EMOJI_IDS["kiss"],
-            ),
-        
-        ],
-        [
-            InlineKeyboardButton(
-                text=wiz_label("BTN_VINYL_ALI", "ali"),
-                callback_data=cb("wiz_color:ali"),
-                style="primary",
-                icon_custom_emoji_id=PREMIUM_EMOJI_IDS["ali"],
-    )],   
-    ])
 
+def wiz_label(var_name: str, value: str) -> str:
+    text = tr(var_name, user_id)
+    if limits.is_premium_color(value) and not has_premium:
+        return f"🔒 {text}"
+    return text
+
+
+return InlineKeyboardMarkup(inline_keyboard=[
+    [
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_BLACK", "default"),
+            callback_data=cb("wiz_color:default"),
+            style=btn_style("default"),
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_PINK", "pink"),
+            callback_data=cb("wiz_color:pink"),
+            style=btn_style("pink"),
+        ),
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_BLUE", "blue"),
+            callback_data=cb("wiz_color:blue"),
+            style=btn_style("blue"),
+        ),
+    ],
+    [
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_YELLOW", "yellow"),
+            callback_data=cb("wiz_color:yellow"),
+            style=btn_style("yellow"),
+        ),
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_RED", "red"),
+            callback_data=cb("wiz_color:red"),
+            style=btn_style("red"),
+        ),
+    ],
+    [
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_GREEN", "green"),
+            callback_data=cb("wiz_color:green"),
+            style=btn_style("green"),
+        ),
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_BLOODY", "bloody"),
+            callback_data=cb("wiz_color:bloody"),
+            style=btn_style("bloody"),
+        ),
+    ],
+    [
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_EMERALD", "emerald"),
+            callback_data=cb("wiz_color:emerald"),
+            style=btn_style("emerald"),
+            icon_custom_emoji_id=PREMIUM_EMOJI_IDS["emerald"],
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_ROSE", "rose"),
+            callback_data=cb("wiz_color:rose"),
+            style=btn_style("rose"),
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_KOI", "koi"),
+            callback_data=cb("wiz_color:koi"),
+            style=btn_style("koi"),
+            icon_custom_emoji_id=PREMIUM_EMOJI_IDS["koi"],
+        ),
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_KISS", "kiss"),
+            callback_data=cb("wiz_color:kiss"),
+            style=btn_style("kiss"),
+            icon_custom_emoji_id=PREMIUM_EMOJI_IDS["kiss"],
+        ),
+    ],
+    [
+        InlineKeyboardButton(
+            text=wiz_label("BTN_VINYL_ALI", "ali"),
+            callback_data=cb("wiz_color:ali"),
+            style=btn_style("ali"),
+        ),
+    ],
+])
 
 def build_wiz_speed_keyboard(user_id: int = 0, channel_chat_id: int | None = None,
                               channel_message_id: int | None = None) -> InlineKeyboardMarkup:
