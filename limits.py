@@ -151,3 +151,36 @@ def remove_whitelist(uid: int) -> bool:
 def list_whitelist() -> list[int]:
     wl = _whitelist_dict()
     return [int(k) for k in wl.keys()]
+
+
+# --- الألوان المدفوعة (Premium-only vinyl colors) ---
+# نفس فكرة القائمة البيضاء بالضبط: قاموس بمفتاح ثابت داخل نفس ملف JSON
+# الدائم، يخزّن أسماء ألوان الأقراص (قيم developer_vinyl_choice، مثل
+# "pink"، "kiss"، "default"...) اللي المطور قفلها بحيث ما تشتغل إلا
+# للمستخدمين المشتركين (is_premium) أو القائمة البيضاء أو المطور نفسه.
+
+_PREMIUM_COLORS_KEY = "_premium_colors"
+
+
+def _premium_colors_dict() -> dict:
+    return _data.setdefault(_PREMIUM_COLORS_KEY, {})
+
+
+def is_premium_color(color: str) -> bool:
+    return color in _premium_colors_dict()
+
+
+def toggle_premium_color(color: str) -> bool:
+    """يبدّل حالة اللون بين مجاني/مدفوع. يرجّع الحالة الجديدة (True = صار مدفوع)."""
+    pc = _premium_colors_dict()
+    if color in pc:
+        pc.pop(color, None)
+        _save()
+        return False
+    pc[color] = {"added_at": time.time()}
+    _save()
+    return True
+
+
+def list_premium_colors() -> list[str]:
+    return list(_premium_colors_dict().keys())
