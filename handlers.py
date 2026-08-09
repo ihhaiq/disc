@@ -562,7 +562,8 @@ def escape_rich_html(text: str) -> str:
 async def send_rich_message(bot: Bot, chat_id: int, html_content: str | None = None,
                              blocks: list | None = None,
                              reply_to_message_id: int | None = None,
-                             reply_markup: InlineKeyboardMarkup | None = None) -> Message:
+                             reply_markup: InlineKeyboardMarkup | None = None,
+                             is_rtl: bool | None = None) -> Message:
     """
     يرسل Rich Message. يدعم مصدرين للمحتوى:
     - blocks: البنية الخام كما وصلتنا من تليكرام (rich_message.blocks) — تُرسَل
@@ -573,9 +574,12 @@ async def send_rich_message(bot: Bot, chat_id: int, html_content: str | None = N
     reply_params = ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
     try:
         if blocks:
-            rich_message = InputRichMessage(blocks=blocks)
+            rich_message = InputRichMessage(
+                blocks=_normalize_rich_blocks_for_input(blocks),
+                is_rtl=is_rtl,
+            )
         else:
-            rich_message = InputRichMessage(html=html_content or "")
+            rich_message = InputRichMessage(html=html_content or "", is_rtl=is_rtl)
         return await bot.send_rich_message(
             chat_id=chat_id,
             rich_message=rich_message,
@@ -594,9 +598,275 @@ async def send_rich_message(bot: Bot, chat_id: int, html_content: str | None = N
     if html_content:
         plain_fallback = re.sub(r"<[^>]+>", " ", html_content)
         plain_fallback = html.unescape(re.sub(r"\s+", " ", plain_fallback)).strip()
+    elif blocks:
+        plain_fallback = _rich_text_fallback(blocks)
     else:
         plain_fallback = "⚠️ تعذّر عرض هذا المحتوى الغني بهالنسخة الحالية."
     return await bot.send_message(chat_id=chat_id, text=plain_fallback, reply_markup=reply_markup)
+
+
+
+# ============================================================
+# تخزين/إرسال النصوص الغنية من محرر Telegram
+# ============================================================
+_RICH_MEDIA_BLOCK_KEYS = {
+    "photo", "video", "animation", "audio", "voice_note", "document"
+}
+
+
+def _model_dump(value):
+    """يدعم aiogram/Pydantic ويترك dict/list العاديين كما هو."""
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump(exclude_none=True)
+        except Exception:
+            pass
+    if hasattr(value, "dict"):
+        try:
+            return value.dict(exclude_none=True)
+        except Exception:
+            pass
+    return value
+
+
+def _normalize_rich_media_for_input(value):
+    """
+    يحوّل RichBlock الناتج من Telegram إلى InputRichBlock صالح للإرسال
+    من جديد. أهم حالة هي الصورة: RichBlockPhoto.photo عبارة عن قائمة
+    PhotoSize، بينما InputRichBlockPhoto.photo يحتاج InputMediaPhoto
+    يحتوي على file_id/media.
+    """
+    if isinstance(value, list):
+        return [_normalize_rich_media_for_input(item) for item in value]
+
+    if not isinstance(value, dict):
+        return value
+
+    result = {}
+    for key, item in value.items():
+        if key == "photo" and isinstance(item, list):
+            # Telegram يعيد عدة PhotoSize؛ نستخدم أعلى دقة متاحة.
+            candidates = [
+                p for p in item
+                if isinstance(p, dict) and p.get("file_id")
+            ]
+            if candidates:
+                largest = max(
+                    candidates,
+                    key=lambda p: (p.get("width", 0) or 0) * (p.get("height", 0) or 0),
+                )
+                result[key] = {"media": largest["file_id"]}
+            else:
+                result[key] = _normalize_rich_media_for_input(item)
+        elif key in _RICH_MEDIA_BLOCK_KEYS and isinstance(item, dict):
+            file_id = item.get("file_id")
+            if file_id:
+                # Output media object -> InputMedia object.
+                result[key] = {"media": file_id}
+            else:
+                result[key] = _normalize_rich_media_for_input(item)
+        else:
+            result[key] = _normalize_rich_media_for_input(item)
+    return result
+
+
+def _normalize_rich_blocks_for_input(blocks: list | None) -> list | None:
+    if not blocks:
+        return None
+    return _normalize_rich_media_for_input(blocks)
+
+
+def _rich_text_fallback(value) -> str:
+    """
+    يستخرج نسخة نصية احتياطية من Rich Blocks. هذه النسخة تُستخدم في:
+    - البحث/المعاينة داخل لوحة المطور
+    - الأزرار أو الأماكن التي لا تدعم Rich Messages
+    - التوافق مع الإصدارات القديمة.
+    """
+    parts: list[str] = []
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            for key, child in obj.items():
+                if key == "text" and isinstance(child, str):
+                    parts.append(child)
+                elif key in {"caption", "summary", "title", "description", "content", "items", "blocks"}:
+                    walk(child)
+        elif isinstance(obj, list):
+            for child in obj:
+                walk(child)
+
+    walk(value)
+    result = "\n".join(p for p in parts if p).strip()
+    return result or "🖼️" if value else ""
+
+
+def _format_rich_value(value, **kwargs):
+    """يطبق str.format على النصوص داخل Rich Blocks عند وجود placeholders."""
+    if not kwargs:
+        return value
+    if isinstance(value, str):
+        try:
+            return value.format(**kwargs)
+        except (KeyError, IndexError, ValueError):
+            return value
+    if isinstance(value, list):
+        return [_format_rich_value(v, **kwargs) for v in value]
+    if isinstance(value, dict):
+        return {k: _format_rich_value(v, **kwargs) for k, v in value.items()}
+    return value
+
+
+def get_text_rich_content(var_name: str, user_id: int = 0) -> dict | None:
+    """
+    يرجع Rich payload المخصص للمتغير باللغة المناسبة.
+    البنية:
+      {"blocks": [...], "is_rtl": bool} أو {"html": "...", "is_rtl": bool}
+    """
+    key = var_name
+    if get_user_lang(user_id) == "en":
+        key = f"EN::{var_name}"
+    return custom_texts.get_custom_rich(key)
+
+
+def get_text_value(var_name: str, user_id: int = 0) -> str:
+    """نسخة str الاحتياطية من المتغير، مع احترام اللغة والتعديلات المخصصة."""
+    return tr(var_name, user_id)
+
+
+async def reply_text_variable(
+    message: Message,
+    bot: Bot,
+    var_name: str,
+    user_id: int = 0,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    **format_kwargs,
+) -> Message:
+    """
+    يرسل المتغير بالطريقة المناسبة:
+    Rich Message إذا حفظ المطور Rich Content، وإلا رسالة نصية عادية.
+    """
+    rich = get_text_rich_content(var_name, user_id)
+    if rich:
+        blocks = _format_rich_value(rich.get("blocks"), **format_kwargs)
+        html_content = _format_rich_value(rich.get("html"), **format_kwargs)
+        if blocks or html_content:
+            return await send_rich_message(
+                bot,
+                message.chat.id,
+                html_content=html_content,
+                blocks=_normalize_rich_blocks_for_input(blocks),
+                reply_to_message_id=message.message_id,
+                reply_markup=reply_markup,
+                is_rtl=rich.get("is_rtl"),
+            )
+
+    text = get_text_value(var_name, user_id)
+    if format_kwargs:
+        text = text.format(**format_kwargs)
+    return await safe_reply(message, text, reply_markup=reply_markup)
+
+
+async def edit_text_variable(
+    message: Message,
+    bot: Bot,
+    var_name: str,
+    user_id: int = 0,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    **format_kwargs,
+) -> Message:
+    """يعدّل رسالة موجودة باستخدام Rich Message إذا كان المتغير غنيًا."""
+    rich = get_text_rich_content(var_name, user_id)
+    if rich:
+        blocks = _format_rich_value(rich.get("blocks"), **format_kwargs)
+        html_content = _format_rich_value(rich.get("html"), **format_kwargs)
+        if blocks or html_content:
+            return await message.edit_text(
+                rich_message=InputRichMessage(
+                    blocks=_normalize_rich_blocks_for_input(blocks),
+                    html=html_content,
+                    is_rtl=rich.get("is_rtl"),
+                ),
+                reply_markup=reply_markup,
+            )
+
+    text = get_text_value(var_name, user_id)
+    if format_kwargs:
+        text = text.format(**format_kwargs)
+    return await message.edit_text(text, reply_markup=reply_markup)
+
+
+async def edit_wizard_text_variable(
+    bot: Bot,
+    uid,
+    target_message: Message,
+    var_name: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    **format_kwargs,
+):
+    """
+    نفس _edit_wizard_text، لكن إذا كان السياق خاصًا يسمح بإظهار Rich Message.
+    في الرسائل المؤقتة داخل المجموعات نستخدم النسخة النصية الاحتياطية لأن
+    واجهة ephemeral الحالية لا تضمن دعم rich_message.
+    """
+    rich = get_text_rich_content(var_name, uid)
+    if rich and not _is_group_context(uid):
+        blocks = _format_rich_value(rich.get("blocks"), **format_kwargs)
+        html_content = _format_rich_value(rich.get("html"), **format_kwargs)
+        if blocks or html_content:
+            return await target_message.edit_text(
+                rich_message=InputRichMessage(
+                    blocks=_normalize_rich_blocks_for_input(blocks),
+                    html=html_content,
+                    is_rtl=rich.get("is_rtl"),
+                ),
+                reply_markup=reply_markup,
+            )
+
+    text = get_text_value(var_name, uid)
+    if format_kwargs:
+        text = text.format(**format_kwargs)
+    return await _edit_wizard_text(
+        bot, uid, target_message, text, reply_markup=reply_markup
+    )
+
+
+async def send_text_variable(
+    bot: Bot,
+    chat_id: int,
+    var_name: str,
+    user_id: int = 0,
+    reply_to_message_id: int | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    **format_kwargs,
+) -> Message:
+    """نسخة عامة من reply_text_variable عندما لا نملك Message أصلية."""
+    rich = get_text_rich_content(var_name, user_id)
+    if rich:
+        blocks = _format_rich_value(rich.get("blocks"), **format_kwargs)
+        html_content = _format_rich_value(rich.get("html"), **format_kwargs)
+        if blocks or html_content:
+            return await send_rich_message(
+                bot,
+                chat_id,
+                html_content=html_content,
+                blocks=_normalize_rich_blocks_for_input(blocks),
+                reply_to_message_id=reply_to_message_id,
+                reply_markup=reply_markup,
+                is_rtl=rich.get("is_rtl"),
+            )
+
+    text = get_text_value(var_name, user_id)
+    if format_kwargs:
+        text = text.format(**format_kwargs)
+    if reply_to_message_id:
+        return await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_parameters=ReplyParameters(message_id=reply_to_message_id),
+            reply_markup=reply_markup,
+        )
+    return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
 
 async def reply_rich(message: Message, bot: Bot, html_content: str | None = None,
@@ -1220,7 +1490,7 @@ async def process_job(bot: Bot, job: dict) -> None:
             if _is_group_context(context_key):
                 animator.set_stage(tr("MSG_PROCESSING_ERROR_FMT", uid).format(error_text=error_text))
             else:
-                await reply_with_premium_emoji(message, tr("MSG_PROCESSING_ERROR_FMT", uid).format(error_text=error_text))
+                await reply_text_variable(message, bot, "MSG_PROCESSING_ERROR_FMT", uid, error_text=error_text)
         except Exception:
             logger.exception(texts_module.LOG_SEND_ERROR_FAILED)
     finally:
@@ -1589,7 +1859,8 @@ def process_text_markup(text: str) -> str:
 
 
 def update_text_variable(var_name: str, new_value: str, editor_id: int = 0,
-                          editor_name: str = "", lang: str = "ar") -> None:
+                          editor_name: str = "", lang: str = "ar",
+                          rich_content: dict | None = None) -> None:
     """
     احفظ التعديل بـ JSON دائم (custom_texts.json) بدل تعديل texts.py مباشرة.
     - يحفظ فوراً بـ DATA_DIR (مربوط بـ Railway Volume)
@@ -1606,7 +1877,13 @@ def update_text_variable(var_name: str, new_value: str, editor_id: int = 0,
             raise ValueError(f"المتغيّر {var_name} غير موجود بقاموس TEXTS_EN")
 
         # احفظ بـ custom_texts.json بمفتاح مميز عشان ما يتعارض مع النسخة العربية
-        custom_texts.set_custom(f"EN::{var_name}", processed_value, editor_id=editor_id, editor_name=editor_name)
+        custom_texts.set_custom(
+            f"EN::{var_name}",
+            processed_value,
+            editor_id=editor_id,
+            editor_name=editor_name,
+            rich=rich_content,
+        )
 
         # حدّث الذاكرة الحالية أيضاً
         texts_module.TEXTS_EN[var_name] = processed_value
@@ -1617,7 +1894,13 @@ def update_text_variable(var_name: str, new_value: str, editor_id: int = 0,
         raise ValueError(f"المتغيّر {var_name} غير موجود بملف texts.py")
 
     # احفظ بـ custom_texts.json (دائم ويبقى بعد Restart)
-    custom_texts.set_custom(var_name, processed_value, editor_id=editor_id, editor_name=editor_name)
+    custom_texts.set_custom(
+        var_name,
+        processed_value,
+        editor_id=editor_id,
+        editor_name=editor_name,
+        rich=rich_content,
+    )
 
     # حدّث الذاكرة الحالية أيضاً (حتى لا تحتاج restart)
     setattr(texts_module, var_name, processed_value)
@@ -1941,6 +2224,49 @@ def normalize_dev_input(text: str) -> str:
     return text
 
 
+
+async def _extract_dev_text_content(message: Message) -> tuple[str | None, dict | None]:
+    """
+    يستقبل الاحتمالين اللذين يدعمهما محرر النصوص:
+      1) نص عادي/منسق عادي -> html fallback.
+      2) Rich Message -> نحفظ blocks الخام + is_rtl، بما فيها الصور
+         والفيديوهات والوسائط المضمّنة.
+
+    لا نحاول تحويل Rich Blocks إلى HTML لأن ذلك قد يفقد الصور والجداول
+    والعناوين وباقي البنية الغنية.
+    """
+    rich = getattr(message, "rich_message", None)
+    if rich is not None:
+        rich_data = _model_dump(rich)
+        if isinstance(rich_data, dict):
+            blocks = rich_data.get("blocks")
+            if blocks:
+                fallback = _rich_text_fallback(blocks)
+                return fallback, {
+                    "blocks": blocks,
+                    "is_rtl": rich_data.get("is_rtl"),
+                }
+
+            # احتياط لنسخ/أنواع aiogram التي قد تعرض html مباشرة.
+            html_value = rich_data.get("html")
+            if html_value:
+                return html_value, {
+                    "html": html_value,
+                    "is_rtl": rich_data.get("is_rtl"),
+                }
+
+    # الرسالة العادية المنسقة من Telegram: نحتفظ بتنسيقها عبر html_text.
+    html_text = getattr(message, "html_text", None)
+    if html_text:
+        return html_text, None
+
+    text = message.text if message.text is not None else message.caption
+    if text is not None:
+        return text, None
+
+    return None, None
+
+
 @router.message(
     lambda m: bool(m.from_user)
     and m.from_user.id == config.DEVELOPER_ID
@@ -1952,72 +2278,127 @@ async def on_text_value_input(message: Message, bot: Bot):
     pending = awaiting_text_value.pop(uid)
     var_name = pending["var_name"]
     lang = pending["lang"]
-    new_value = normalize_dev_input(message.text or "")
 
-    if not new_value.strip():
+    # ========================================================
+    # الاحتمال 1: Rich Message من محرر Telegram
+    # الاحتمال 2: نص عادي/منسق عادي
+    # ========================================================
+    extracted_value, rich_content = await _extract_dev_text_content(message)
+
+    if not extracted_value or not extracted_value.strip():
         awaiting_text_value[uid] = pending
         await message.reply(
-            "❌ النص وصلني فاضي (أو صار فاضي بعد تنظيفه). تليكرام يرفض حفظ رسالة فاضية.\n\n"
-            "لو أرسلت رسالة \"غنية\" (Rich Message) بتنسيق خاص، هذا المحرر يدعم HTML بس + "
-            "صيغة ماركداون الإيموجي الرسمية <code>![إيموجي](tg://emoji?id=ID)</code>، "
-            "ولا يدعم عناصر زي <code>&lt;footer&gt;</code> أو أي وسم HTML غير مدعوم بتليكرام.\n\n"
-            "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
+            "❌ ما قدرت أستخرج محتوى صالح من الرسالة.\n\n"
+            "أرسل نصًا عاديًا، أو أرسل رسالة من محرر Telegram الغني (Rich Message). "
+            "وإذا كانت الرسالة الغنية تحتوي صورة أو وسائط، سأحفظها معها أيضًا.\n\n"
+            "أو أرسل /cancel_edit للإلغاء."
         )
         return
 
-    # 1️⃣ تحقق من صيغة الإيموجي البريميوم
-    is_valid_emoji, emoji_error = validate_premium_emoji_syntax(new_value)
-    if not is_valid_emoji:
-        awaiting_text_value[uid] = pending
-        await message.reply(
-            f"❌ خطأ في صيغة الإيموجي البريميوم:\n"
-            f"<code>{html.escape(emoji_error)}</code>\n\n"
-            "الصيغة الصحيحة:\n"
-            "<code>&lt;tg-emoji emoji-id='123'&gt;🎶&lt;/tg-emoji&gt;</code>\n"
-            "أو صيغة ماركداون تليكرام الرسمية:\n"
-            "<code>![🎶](tg://emoji?id=123)</code>\n\n"
-            "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
-        )
-        return
+    # Rich Message وصلنا من Telegram: لا نعيد تفسيره كـ HTML.
+    # نحتفظ بالـ blocks الخام حتى تبقى الصورة/الوسائط/الجداول/التنسيقات.
+    if rich_content:
+        new_value = extracted_value
+        emojis_found = {}
+    else:
+        # النص العادي يحتفظ بالسلوك القديم بالكامل.
+        new_value = normalize_dev_input(extracted_value)
 
-    # 2️⃣ تحقق من HTML العام
-    html_error = await validate_html_text(bot, message.chat.id, new_value)
-    if html_error:
-        awaiting_text_value[uid] = pending
-        await message.reply(
-            "❌ النص فيه خطأ HTML ولن يُحفظ حتى يصير صحيحًا:\n"
-            f"<code>{html.escape(html_error)}</code>\n\n"
-            "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
-        )
-        return
+        if not new_value.strip():
+            awaiting_text_value[uid] = pending
+            await message.reply(
+                "❌ النص وصلني فاضي (أو صار فاضي بعد تنظيفه).\n\n"
+                "أرسل نصًا عاديًا أو رسالة Rich من محرر Telegram."
+            )
+            return
 
-    # 3️⃣ استخرج أكواد الإيموجي البريميوم تلقائياً
-    emojis_found = extract_premium_emojis(new_value)
-    
+        is_valid_emoji, emoji_error = validate_premium_emoji_syntax(new_value)
+        if not is_valid_emoji:
+            awaiting_text_value[uid] = pending
+            await message.reply(
+                f"❌ خطأ في صيغة الإيموجي البريميوم:\n"
+                f"<code>{html.escape(emoji_error)}</code>\n\n"
+                "الصيغة الصحيحة:\n"
+                "<code>&lt;tg-emoji emoji-id='123'&gt;🎶&lt;/tg-emoji&gt;</code>\n"
+                "أو صيغة ماركداون تليكرام الرسمية:\n"
+                "<code>![🎶](tg://emoji?id=123)</code>\n\n"
+                "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
+            )
+            return
+
+        html_error = await validate_html_text(bot, message.chat.id, new_value)
+        if html_error:
+            awaiting_text_value[uid] = pending
+            await message.reply(
+                "❌ النص فيه خطأ HTML ولن يُحفظ حتى يصير صحيحًا:\n"
+                f"<code>{html.escape(html_error)}</code>\n\n"
+                "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
+            )
+            return
+
+        emojis_found = extract_premium_emojis(new_value)
+
     try:
-        # احفظ مع معلومات المحرّر
         user = message.from_user
-        editor_name = user.first_name or user.username or f"User{uid}" if user else "Unknown"
-        update_text_variable(var_name, new_value, editor_id=uid, editor_name=editor_name, lang=lang)
+        editor_name = (
+            (user.first_name or user.username or f"User{uid}")
+            if user else "Unknown"
+        )
+
+        update_text_variable(
+            var_name,
+            new_value,
+            editor_id=uid,
+            editor_name=editor_name,
+            lang=lang,
+            rich_content=rich_content,
+        )
     except Exception as e:
         logger.exception("فشل حفظ النص المخصص")
         await message.reply(f"❌ فشل الحفظ:\n<code>{html.escape(str(e))}</code>")
         return
 
-    # 4️⃣ رسالة النجاح مع معلومات الإيموجي
     emoji_info = ""
     if emojis_found:
-        emoji_list = "\n".join([f"  • {emoji} (ID: {emoji_id})" for emoji, emoji_id in emojis_found.items()])
+        emoji_list = "\n".join(
+            [f"  • {emoji} (ID: {emoji_id})" for emoji, emoji_id in emojis_found.items()]
+        )
         emoji_info = f"\n\n🎯 الإيموجي البريميوم المكتشفة تلقائياً:\n{emoji_list}"
+
+    rich_info = ""
+    if rich_content:
+        blocks = rich_content.get("blocks") or []
+        media_count = 0
+
+        def count_media(obj):
+            nonlocal media_count
+            if isinstance(obj, dict):
+                if obj.get("type") in {
+                    "photo", "video", "animation", "audio", "voice_note", "document"
+                }:
+                    media_count += 1
+                for child in obj.values():
+                    count_media(child)
+            elif isinstance(obj, list):
+                for child in obj:
+                    count_media(child)
+
+        count_media(blocks)
+        rich_info = (
+            "\n✨ النوع: <b>Rich Message</b>"
+            f"\n🧱 البلوكات: {len(blocks)}"
+            + (f"\n🖼️ الوسائط داخلها: {media_count}" if media_count else "")
+        )
 
     lang_label = "English" if lang == "en" else "عربي"
     success_msg = (
         f"✅ تم حفظ <code>{var_name}</code> ({lang_label}) بنجاح بشكل <b>دائم</b>! 🎉\n"
-        f"✨ التغيير مفعّل فوراً وسيبقى حتى بعد إعادة تشغيل البوت.\n"
-        f"👤 محرّر: {editor_name} (ID: {uid})"
+        "✨ التغيير مفعّل فوراً وسيبقى حتى بعد إعادة تشغيل البوت.\n"
+        f"👤 محرّر: {html.escape(editor_name)} (ID: {uid})"
+        f"{rich_info}"
         f"{emoji_info}"
     )
-    
+
     await message.reply(success_msg, reply_markup=build_dev_keyboard())
 
 
@@ -2025,9 +2406,8 @@ async def on_text_value_input(message: Message, bot: Bot):
 async def on_start(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
     me = await bot.get_me()
-    await safe_reply(
-        message,
-        tr("MSG_START_HELP", uid),
+    await reply_text_variable(
+        message, bot, "MSG_START_HELP", uid,
         reply_markup=build_start_keyboard(uid, me.username),
     )
 @router.callback_query(F.data == "customize:open")
@@ -2049,8 +2429,8 @@ async def on_customize_open(callback, bot: Bot):
 async def on_customize_back(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
     me = await bot.get_me()
-    await callback.message.edit_text(
-        tr("MSG_START_HELP", user_id),
+    await edit_text_variable(
+        callback.message, bot, "MSG_START_HELP", user_id,
         reply_markup=build_start_keyboard(user_id, me.username),
     )
     await callback.answer()
@@ -2059,15 +2439,25 @@ async def on_customize_back(callback, bot: Bot):
 @router.callback_query(F.data == "vinyl_menu:open")
 async def on_vinyl_menu_open(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
-    if developer_menu_image_file_id:
+    if developer_menu_image_file_id and not get_text_rich_content("MSG_VINYL_COLOR_INFO", user_id):
         await callback.message.delete()
         await callback.message.answer_photo(
             developer_menu_image_file_id,
             caption=tr("MSG_VINYL_COLOR_INFO", user_id),
             reply_markup=build_vinyl_color_keyboard(user_id),
         )
+    elif developer_menu_image_file_id:
+        # إذا صار النص نفسه Rich Message، نرسل الـRich بدل اختزاله إلى caption.
+        await callback.message.delete()
+        await send_text_variable(
+            bot, callback.message.chat.id, "MSG_VINYL_COLOR_INFO", user_id,
+            reply_markup=build_vinyl_color_keyboard(user_id),
+        )
     else:
-        await callback.message.edit_text(tr("MSG_VINYL_COLOR_INFO", user_id), reply_markup=build_vinyl_color_keyboard(user_id))
+        await edit_text_variable(
+            callback.message, bot, "MSG_VINYL_COLOR_INFO", user_id,
+            reply_markup=build_vinyl_color_keyboard(user_id),
+        )
     await callback.answer()
 
 
@@ -2076,7 +2466,10 @@ async def on_vinyl_menu_back(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
     if developer_menu_image_file_id:
         await callback.message.delete()
-        await callback.message.answer(tr("MSG_START_HELP", user_id), reply_markup=build_customize_keyboard(user_id))
+        await send_text_variable(
+            bot, callback.message.chat.id, "MSG_START_HELP", user_id,
+            reply_markup=build_customize_keyboard(user_id),
+        )
     else:
         await callback.message.edit_text("⚙️ تخصيص إعدادات القرص:", reply_markup=build_customize_keyboard(user_id))
     await callback.answer()
@@ -2100,8 +2493,8 @@ async def on_lang_toggle(callback, bot: Bot):
     ))
     try:
         if is_color_menu:
-            await callback.message.edit_text(
-                tr("MSG_VINYL_COLOR_INFO", user_id),
+            await edit_text_variable(
+                callback.message, bot, "MSG_VINYL_COLOR_INFO", user_id,
                 reply_markup=build_vinyl_color_keyboard(user_id),
             )
         elif is_customize_menu:
@@ -2111,8 +2504,8 @@ async def on_lang_toggle(callback, bot: Bot):
             )
         else:
             me = await bot.get_me()
-            await callback.message.edit_text(
-                tr("MSG_START_HELP", user_id),
+            await edit_text_variable(
+                callback.message, bot, "MSG_START_HELP", user_id,
                 reply_markup=build_start_keyboard(user_id, me.username),
             )
     except TelegramBadRequest:
@@ -2156,7 +2549,7 @@ async def on_channel_audio(message: Message, bot: Bot):
     ])
 
     try:
-        prompt = await message.reply(tr("MSG_CHOOSE_MODE", key), reply_markup=keyboard)
+        prompt = await reply_text_variable(message, bot, "MSG_CHOOSE_MODE", key, reply_markup=keyboard)
     except TelegramBadRequest as e:
         pending_audio.pop(key, None)
         if "rights" in str(e).lower() or "administrator" in str(e).lower():
@@ -2185,20 +2578,27 @@ async def on_audio(message: Message, bot: Bot):
 
     if owner_id != config.DEVELOPER_ID and not limits.can_create(owner_id):
         hours = max(1, math.ceil(limits.get_reset_seconds(owner_id) / 3600))
-        limit_text = tr("MSG_LIMIT_REACHED_FMT", owner_id).format(
-            limit=limits.get_daily_limit(owner_id),
-            hours=hours,
-            premium_limit=config.PREMIUM_DAILY_LIMIT,
-            price=config.STARS_SUBSCRIPTION_PRICE,
-        )
+        format_kwargs = {
+            "limit": limits.get_daily_limit(owner_id),
+            "hours": hours,
+            "premium_limit": config.PREMIUM_DAILY_LIMIT,
+            "price": config.STARS_SUBSCRIPTION_PRICE,
+        }
         if is_group:
+            # الرسائل المؤقتة الحالية لا تضمن Rich Message؛ نستخدم النسخة
+            # النصية الاحتياطية، بينما الخاص يرسل Rich كاملًا.
+            limit_text = tr("MSG_LIMIT_REACHED_FMT", owner_id).format(**format_kwargs)
             await send_ephemeral_text(
                 bot, message.chat.id, owner_id,
                 limit_text,
                 reply_markup=build_buy_stars_keyboard(owner_id),
             )
         else:
-            await message.reply(limit_text, reply_markup=build_buy_stars_keyboard(owner_id))
+            await reply_text_variable(
+                message, bot, "MSG_LIMIT_REACHED_FMT", owner_id,
+                reply_markup=build_buy_stars_keyboard(owner_id),
+                **format_kwargs,
+            )
         return
 
     if audio.file_size and audio.file_size > config.MAX_TELEGRAM_AUDIO_SIZE_BYTES:
@@ -2233,7 +2633,7 @@ async def on_audio(message: Message, bot: Bot):
         )
         pending_audio[uid]["ephemeral_message_id"] = sent.ephemeral_message_id
     else:
-        await message.reply(tr("MSG_CHOOSE_MODE", owner_id), reply_markup=keyboard)
+        await reply_text_variable(message, bot, "MSG_CHOOSE_MODE", owner_id, reply_markup=keyboard)
 
 
 def _get_pending_audio_or_none(uid: int) -> dict | None:
@@ -2274,7 +2674,7 @@ async def on_mode_quick(callback, bot: Bot):
             job["uid"] = pending.get("owner_user_id", uid)
             job["status_ephemeral_message_id"] = _ephemeral_id(pending)
         else:
-            await edit_text_with_premium_emoji(callback.message, tr("MSG_JOB_QUEUED", uid))
+            await edit_wizard_text_variable(bot, uid, callback.message, "MSG_JOB_QUEUED")
         pending_audio.pop(uid, None)
         job["segment_start"] = 0.0
         await _launch_job(bot, job["uid"], job)
@@ -2285,7 +2685,7 @@ async def on_mode_quick(callback, bot: Bot):
         await _edit_wizard_text(bot, uid, callback.message, texts_module.MSG_CHANNEL_ASK_IMAGE_REPLY)
     else:
         pending_images[uid] = {"quick_mode": True, "audio_message_id": pending["message"].message_id}
-        await _edit_wizard_text(bot, uid, callback.message, tr("MSG_QUICK_NEED_IMAGE", uid))
+        await edit_wizard_text_variable(bot, uid, callback.message, "MSG_QUICK_NEED_IMAGE")
     await callback.answer()
 
 
@@ -2657,7 +3057,7 @@ async def on_cancel_queue(callback, bot: Bot):
             except Exception:
                 pass
     else:
-        await callback.message.edit_text(tr("MSG_QUEUE_CANCELED_EDIT", uid))
+        await edit_text_variable(callback.message, bot, "MSG_QUEUE_CANCELED_EDIT", uid)
     pending_audio.pop(uid, None)
     wizard_state.pop(uid, None)
     await callback.answer(tr("MSG_QUEUE_CANCELED_ANSWER", uid))
@@ -2666,7 +3066,7 @@ async def on_cancel_queue(callback, bot: Bot):
 @router.callback_query(F.data == "add_image")
 async def on_add_image(callback, bot: Bot):
     uid = callback.from_user.id if callback.from_user else 0
-    await callback.message.reply(tr("MSG_SEND_IMAGE_NOW", uid))
+    await reply_text_variable(callback.message, bot, "MSG_SEND_IMAGE_NOW", uid)
     pending_images[callback.from_user.id] = {"waiting_for_image": True}
     await callback.answer()
 
@@ -2723,19 +3123,19 @@ async def on_photo_for_audio(message: Message, bot: Bot):
     if uid in wizard_state:
         pending_entry = _get_pending_audio_or_none(uid)
         if not pending_entry:
-            await message.reply(tr("MSG_AUDIO_EXPIRED", uid))
+            await reply_text_variable(message, bot, "MSG_AUDIO_EXPIRED", uid)
             return
         photo = message.photo[-1]
         pending_entry["thumbnail_file_id"] = photo.file_id
         if _is_group_context(uid):
             original = pending_entry.get("message")
-            await _edit_wizard_text(bot, uid, original, tr("MSG_IMAGE_RECEIVED", owner_id))
+            await edit_wizard_text_variable(bot, uid, original, "MSG_IMAGE_RECEIVED")
             await _wiz_advance_to_segment_or_finish(
                 bot, uid, original,
                 lambda text, **kwargs: _edit_wizard_text(bot, uid, original, text, **kwargs),
             )
         else:
-            await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
+            await reply_text_variable(message, bot, "MSG_IMAGE_RECEIVED", uid)
             await _wiz_advance_to_segment_or_finish(bot, uid, message, message.reply)
         return
 
@@ -2749,7 +3149,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         pending_entry = _get_pending_audio_or_none(uid)
         if not pending_entry:
             pending_images.pop(uid, None)
-            await message.reply(tr("MSG_AUDIO_EXPIRED", uid))
+            await reply_text_variable(message, bot, "MSG_AUDIO_EXPIRED", uid)
             return
 
         job = dict(pending_entry)
@@ -2759,11 +3159,11 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         job["segment_start"] = 0.0
 
         if not _is_group_context(uid):
-            await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
+            await reply_text_variable(message, bot, "MSG_IMAGE_RECEIVED", uid)
         else:
             original = job.get("message")
             if original is not None:
-                await _edit_wizard_text(bot, uid, original, tr("MSG_IMAGE_RECEIVED", owner_id))
+                await edit_wizard_text_variable(bot, uid, original, "MSG_IMAGE_RECEIVED")
         pending_audio.pop(uid, None)
         pending_images.pop(uid, None)
         await _launch_job(bot, job["uid"], job)
@@ -2773,13 +3173,13 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         photo = message.photo[-1]
         pending_entry = pending_audio.get(uid)
         if not pending_entry:
-            await message.reply(tr("MSG_NO_PENDING_AUDIO", uid))
+            await reply_text_variable(message, bot, "MSG_NO_PENDING_AUDIO", uid)
             return
 
         if time.time() > pending_entry["expires_at"]:
             pending_audio.pop(uid, None)
             pending_images.pop(uid, None)
-            await message.reply(tr("MSG_AUDIO_EXPIRED", uid))
+            await reply_text_variable(message, bot, "MSG_AUDIO_EXPIRED", uid)
             return
 
         pending_images[uid] = {"photo_file_id": photo.file_id, "audio_message_id": pending.get("audio_message_id")}
@@ -2794,11 +3194,11 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         job["segment_start"] = 0.0
 
         if not _is_group_context(uid):
-            await reply_with_premium_emoji(message, tr("MSG_IMAGE_RECEIVED", uid))
+            await reply_text_variable(message, bot, "MSG_IMAGE_RECEIVED", uid)
         else:
             original = job.get("message")
             if original is not None:
-                await _edit_wizard_text(bot, uid, original, tr("MSG_IMAGE_RECEIVED", owner_id))
+                await edit_wizard_text_variable(bot, uid, original, "MSG_IMAGE_RECEIVED")
         pending_audio.pop(uid, None)
         pending_images.pop(uid, None)
 
@@ -2847,7 +3247,7 @@ async def on_speed_selected(callback, bot: Bot):
 @router.message((F.video | F.voice | F.document), F.chat.type == "private")
 async def on_wrong_type(message: Message):
     uid = message.from_user.id if message.from_user else 0
-    await message.reply(tr("MSG_WRONG_TYPE", uid))
+    await reply_text_variable(message, bot, "MSG_WRONG_TYPE", uid)
 
 
 @router.callback_query(F.data == "buy_stars")
@@ -2875,7 +3275,7 @@ async def on_successful_payment(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
     limits.activate_subscription(uid, config.STARS_SUBSCRIPTION_DAYS)
     logger.info(texts_module.LOG_PAYMENT_RECORDED, uid)
-    await reply_with_premium_emoji(message, tr("MSG_PAYMENT_SUCCESS_FMT", uid).format(limit=config.PREMIUM_DAILY_LIMIT))
+    await reply_text_variable(message, bot, "MSG_PAYMENT_SUCCESS_FMT", uid, limit=config.PREMIUM_DAILY_LIMIT)
 
     if config.DEVELOPER_ID:
         user = message.from_user

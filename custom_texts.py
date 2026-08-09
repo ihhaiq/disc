@@ -65,9 +65,8 @@ _load()
 
 def get_custom(var_name: str, default: str | None = None) -> str | None:
     """
-    احصل على نص مخصص.
-    - لو موجود بـ custom_texts.json ← أرجعه
-    - لو ما موجود ← أرجع default (أو None)
+    احصل على قيمة النص المخصصة (النسخة النصية الاحتياطية).
+    المحتوى الغني، إن وجد، محفوظ بشكل منفصل داخل entry["rich"].
     """
     entry = _custom_data.get(var_name)
     if entry:
@@ -75,16 +74,41 @@ def get_custom(var_name: str, default: str | None = None) -> str | None:
     return default
 
 
-def set_custom(var_name: str, value: str, editor_id: int = 0, editor_name: str = "") -> None:
+def get_custom_rich(var_name: str) -> dict | None:
+    """أرجع محتوى Rich Message المحفوظ للمتغير، أو None للنص العادي."""
+    entry = _custom_data.get(var_name)
+    if not entry:
+        return None
+    rich = entry.get("rich")
+    return rich if isinstance(rich, dict) else None
+
+
+def set_custom(
+    var_name: str,
+    value: str,
+    editor_id: int = 0,
+    editor_name: str = "",
+    rich: dict | None = None,
+) -> None:
     """
     احفظ نص مخصص.
+
+    ``value`` يبقى دائمًا كنسخة نصية احتياطية حتى تبقى كل أجزاء البوت
+    التي تتوقع ``str`` متوافقة. إذا كان المحتوى Rich Message، يُحفظ تمثيله
+    الخام في ``rich`` ويُستخدم عند الإرسال في سياق يدعم Rich Messages.
     """
-    _custom_data[var_name] = {
+    entry = {
         "value": value,
         "updated_at": time.time(),
         "editor_id": editor_id,
         "editor_name": editor_name,
     }
+    if rich is not None:
+        entry["rich"] = rich
+    else:
+        # عند تحويل الرسالة من Rich إلى نص عادي لا نبقي المحتوى القديم.
+        entry.pop("rich", None)
+    _custom_data[var_name] = entry
     _save()
     logger.info(f"✅ تم حفظ نص مخصص: {var_name}")
 
