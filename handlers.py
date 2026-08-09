@@ -361,7 +361,7 @@ CHANNEL_RESULT_EMOJI = "💌"
 # دعم إيموجي بريميوم (Telegram Premium Custom Emoji)
 # ============================================================
 PREMIUM_EMOJI_IDS = {
-    "emerald": "5285265490350972397", "koi": "5339487433828353468", "kiss": "5474525960143385880", "ali": "5460737770798489825"
+    "emerald": "5285265490350972397", "koi": "5339487433828353468", "kiss": "5474525960143385880", "ali": "5460737770798489825", "black" : "5399878127163811970"
 }
 USE_PREMIUM_EMOJI = bool(PREMIUM_EMOJI_IDS)
 
@@ -1326,7 +1326,8 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text=label("BTN_VINYL_BLACK", "default"),
             callback_data="vinyl:default",
-            style=btn_style("default")
+            style=btn_style("default"),
+            icon_custom_emoji_id=PREMIUM_EMOJI_IDS["black"],
         )
     ],
     [
