@@ -996,6 +996,37 @@ def get_developer_hole_ratio(vinyl_choice: str | None) -> float:
     return VINYL_HOLE_RATIO_OVERRIDES.get(vinyl_choice, config.HOLE_RATIO)
 
 
+# القائمة الكاملة لكل ألوان الأقراص المتوفرة بالبوت: (القيمة الداخلية
+# المستخدمة بـ developer_vinyl_choice، اسم متغيّر النص بـ texts.py). تُستخدم
+# كمصدر وحيد لبناء لوحة "🔒 الحدود" بلوحة المطور، بدل تكرار القائمة بأكثر
+# من مكان.
+VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
+    ("default", "BTN_VINYL_BLACK"),
+    ("pink", "BTN_VINYL_PINK"),
+    ("blue", "BTN_VINYL_BLUE"),
+    ("yellow", "BTN_VINYL_YELLOW"),
+    ("red", "BTN_VINYL_RED"),
+    ("green", "BTN_VINYL_GREEN"),
+    ("bloody", "BTN_VINYL_BLOODY"),
+    ("rose", "BTN_VINYL_ROSE"),
+    ("emerald", "BTN_VINYL_EMERALD"),
+    ("koi", "BTN_VINYL_KOI"),
+    ("kiss", "BTN_VINYL_KISS"),
+]
+
+
+def user_has_premium_access(user_id: int) -> bool:
+    """
+    يرجّع True لو المستخدم يقدر يستخدم الألوان المدفوعة: مشترك فعليًا
+    (limits.is_premium)، أو بالقائمة البيضاء، أو هو المطور نفسه.
+    """
+    if user_id and user_id == config.DEVELOPER_ID:
+        return True
+    if limits.is_whitelisted(user_id):
+        return True
+    return limits.is_premium(user_id)
+
+
 def get_job_priority(user_id: int) -> int:
     return 0 if user_id and user_id == config.DEVELOPER_ID else 1
 
@@ -1270,10 +1301,13 @@ def build_start_keyboard(user_id: int, bot_username: str) -> InlineKeyboardMarku
 
 def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
     current = developer_vinyl_choice.get(user_id)
+    has_premium = user_has_premium_access(user_id)
 
     def label(var_name: str, value: str) -> str:
         text = tr(var_name, user_id)
         is_selected = current == value or (current is None and value == "default")
+        if limits.is_premium_color(value) and not has_premium:
+            text = f"🔒 {text}"
         return f"{text} ✅" if is_selected else text
 
     def btn_style(value: str) -> str:
@@ -1385,6 +1419,7 @@ def build_dev_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✏️ تحرير النصوص (عربي)", callback_data="dev_text:page:ar:0")],
         [InlineKeyboardButton(text="✏️ Edit Texts (English)", callback_data="dev_text:page:en:0")],
         [InlineKeyboardButton(text="🛡️ القائمة البيضاء", callback_data="dev_whitelist:open")],
+        [InlineKeyboardButton(text=texts_module.BTN_DEV_LIMITS_MENU, callback_data="dev_limits:open")],
     ])
 
 
@@ -1405,6 +1440,58 @@ def _whitelist_text() -> str:
         return "🛡️ القائمة البيضاء (مستثناة من كل الحدود اليومية):\n\nلا يوجد أحد حاليًا."
     body = "\n".join(f"• {uid}" for uid in ids)
     return f"🛡️ القائمة البيضاء (مستثناة من كل الحدود اليومية):\n\n{body}"
+
+
+# ============================================================
+# لوحة المطور — "🔒 الحدود": تحديد الأقراص المدفوعة (Premium-only colors)
+# ============================================================
+def build_dev_limits_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    for value, text_var in VINYL_COLOR_CHOICES:
+        color_label = getattr(texts_module, text_var, value)
+        is_paid = limits.is_premium_color(value)
+        suffix = texts_module.BTN_DEV_LIMITS_PAID_SUFFIX if is_paid else texts_module.BTN_DEV_LIMITS_FREE_SUFFIX
+        rows.append([InlineKeyboardButton(
+            text=f"{color_label} — {suffix}",
+            callback_data=f"dev_limits:toggle:{value}",
+            style="danger" if is_paid else "primary",
+        )])
+    rows.append([InlineKeyboardButton(text=texts_module.BTN_BACK, callback_data="dev_limits:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data == "dev_limits:open")
+async def on_dev_limits_open(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
+        return
+    await callback.message.edit_text(texts_module.MSG_DEV_LIMITS_HEADER, reply_markup=build_dev_limits_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("dev_limits:toggle:"))
+async def on_dev_limits_toggle(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
+        return
+    value = callback.data.split(":", 2)[2]
+    color_names = dict(VINYL_COLOR_CHOICES)
+    color_label = getattr(texts_module, color_names.get(value, ""), value)
+    now_paid = limits.toggle_premium_color(value)
+    await callback.message.edit_text(texts_module.MSG_DEV_LIMITS_HEADER, reply_markup=build_dev_limits_keyboard())
+    if now_paid:
+        await callback.answer(texts_module.MSG_DEV_LIMITS_TOGGLED_PAID_FMT.format(name=color_label))
+    else:
+        await callback.answer(texts_module.MSG_DEV_LIMITS_TOGGLED_FREE_FMT.format(name=color_label))
+
+
+@router.callback_query(F.data == "dev_limits:back")
+async def on_dev_limits_back(callback, bot: Bot):
+    if not callback.from_user or callback.from_user.id != config.DEVELOPER_ID:
+        await callback.answer(texts_module.MSG_DEV_ONLY_OPTION)
+        return
+    await callback.message.edit_text(texts_module.MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard())
+    await callback.answer()
 
 
 # ============================================================
@@ -2238,53 +2325,61 @@ def build_wiz_color_keyboard(
             channel_message_id
         )
 
+    has_premium = user_has_premium_access(user_id)
+
+    def wiz_label(var_name: str, value: str) -> str:
+        text = tr(var_name, user_id)
+        if limits.is_premium_color(value) and not has_premium:
+            return f"🔒 {text}"
+        return text
+
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_BLACK", user_id),
+                text=wiz_label("BTN_VINYL_BLACK", "default"),
                 callback_data=cb("wiz_color:default"),
                 style="primary"
             )
         ],
         [
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_PINK", user_id),
+                text=wiz_label("BTN_VINYL_PINK", "pink"),
                 callback_data=cb("wiz_color:pink"),
                 style="primary"
             ),
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_BLUE", user_id),
+                text=wiz_label("BTN_VINYL_BLUE", "blue"),
                 callback_data=cb("wiz_color:blue"),
                 style="primary"
             ),
         ],
         [
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_YELLOW", user_id),
+                text=wiz_label("BTN_VINYL_YELLOW", "yellow"),
                 callback_data=cb("wiz_color:yellow"),
                 style="primary"
             ),
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_RED", user_id),
+                text=wiz_label("BTN_VINYL_RED", "red"),
                 callback_data=cb("wiz_color:red"),
                 style="primary"
             ),
         ],
         [
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_GREEN", user_id),
+                text=wiz_label("BTN_VINYL_GREEN", "green"),
                 callback_data=cb("wiz_color:green"),
                 style="primary"
             ),
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_BLOODY", user_id),
+                text=wiz_label("BTN_VINYL_BLOODY", "bloody"),
                 callback_data=cb("wiz_color:bloody"),
                 style="primary"
             )
         ],
         [
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_EMERALD", user_id),
+                text=wiz_label("BTN_VINYL_EMERALD", "emerald"),
                 callback_data=cb("wiz_color:emerald"),
                 style="primary",
                 icon_custom_emoji_id=PREMIUM_EMOJI_IDS["emerald"],
@@ -2292,20 +2387,20 @@ def build_wiz_color_keyboard(
         ],
         [
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_ROSE", user_id),
+                text=wiz_label("BTN_VINYL_ROSE", "rose"),
                 callback_data=cb("wiz_color:rose"),
                 style="primary"
             )
         ],
         [
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_KOI", user_id),
+                text=wiz_label("BTN_VINYL_KOI", "koi"),
                 callback_data=cb("wiz_color:koi"),
                 style="primary",
                 icon_custom_emoji_id=PREMIUM_EMOJI_IDS["koi"],
             ),
             InlineKeyboardButton(
-                text=tr("BTN_VINYL_KISS", user_id),
+                text=wiz_label("BTN_VINYL_KISS", "kiss"),
                 callback_data=cb("wiz_color:kiss"),
                 style="primary",
                 icon_custom_emoji_id=PREMIUM_EMOJI_IDS["kiss"],
@@ -2375,8 +2470,15 @@ async def on_wiz_color(callback, bot: Bot):
         await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
         return
     choice = base.split(":", 1)[1]
-    if choice in ("green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "koi", "kiss"):
-        developer_vinyl_choice[uid] = choice
+    presser_id = callback.from_user.id if callback.from_user else 0
+    if choice in ("green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "koi", "kiss", "default"):
+        if limits.is_premium_color(choice) and not user_has_premium_access(presser_id):
+            await callback.answer(tr("MSG_COLOR_PREMIUM_ONLY", presser_id), show_alert=True)
+            return
+        if choice == "default":
+            developer_vinyl_choice.pop(uid, None)
+        else:
+            developer_vinyl_choice[uid] = choice
     else:
         # default/black = القرص الأسود الافتراضي.
         developer_vinyl_choice.pop(uid, None)
@@ -2675,8 +2777,14 @@ async def on_photo_for_audio(message: Message, bot: Bot):
 async def on_vinyl_choice(callback, bot: Bot):
     choice = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id if callback.from_user else 0
-    if choice in ("pink", "blue", "yellow", "red", "green", "bloody", "rose", "emerald", "koi", "kiss"):
-        developer_vinyl_choice[user_id] = choice
+    if choice in ("pink", "blue", "yellow", "red", "green", "bloody", "rose", "emerald", "koi", "kiss", "default"):
+        if limits.is_premium_color(choice) and not user_has_premium_access(user_id):
+            await callback.answer(tr("MSG_COLOR_PREMIUM_ONLY", user_id), show_alert=True)
+            return
+        if choice == "default":
+            developer_vinyl_choice.pop(user_id, None)
+        else:
+            developer_vinyl_choice[user_id] = choice
     else:
         developer_vinyl_choice.pop(user_id, None)
     await callback.message.edit_reply_markup(reply_markup=build_vinyl_color_keyboard(user_id))
