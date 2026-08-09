@@ -61,6 +61,7 @@ VINYL_KOI_PATH = os.path.join(ASSETS_DIR, "vinyl_koi.png")
 SHADOW_KOI_PATH = os.path.join(ASSETS_DIR, "shadow_koi.png")
 VINYL_KISS_PATH = os.path.join(ASSETS_DIR, "vinyl_kiss.png")
 SHADOW_KISS_PATH = os.path.join(ASSETS_DIR, "shadow_kiss.png")
+VINYL_ali_PATH = os.path.join(ASSETS_DIR, "vinyl_ali.png")
 
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
 
