@@ -361,7 +361,7 @@ CHANNEL_RESULT_EMOJI = "💌"
 # دعم إيموجي بريميوم (Telegram Premium Custom Emoji)
 # ============================================================
 PREMIUM_EMOJI_IDS = {
-    "emerald": "5285265490350972397", "koi": "5339487433828353468", "kiss": "5474525960143385880"
+    "emerald": "5285265490350972397", "koi": "5339487433828353468", "kiss": "5474525960143385880", "ali": "5460737770798489825"
 }
 USE_PREMIUM_EMOJI = bool(PREMIUM_EMOJI_IDS)
 
@@ -955,6 +955,8 @@ def get_developer_vinyl_path(user_id: int, choice_override: str | None = None) -
         return config.VINYL_KOI_PATH
     if choice == "kiss":
         return config.VINYL_KISS_PATH
+    if choice == "ali":
+        return config.VINYL_ALI_PATH
     return config.VINYL_PATH
 
 
@@ -979,6 +981,8 @@ def get_developer_shadow_path(user_id: int, choice_override: str | None = None) 
     if choice == "koi":
         return config.SHADOW_ROSE_PATH
     if choice == "kiss":
+        return config.SHADOW_ROSE_PATH
+    if choice == "ali":
         return config.SHADOW_ROSE_PATH
     return config.SHADOW_PATH
 
@@ -1012,6 +1016,7 @@ VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
     ("emerald", "BTN_VINYL_EMERALD"),
     ("koi", "BTN_VINYL_KOI"),
     ("kiss", "BTN_VINYL_KISS"),
+    ("ali", "BTN_VINYL_ALI"),
 ]
 
 
@@ -1385,6 +1390,12 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             callback_data="vinyl:kiss",
             style=btn_style("kiss"),
             icon_custom_emoji_id=PREMIUM_EMOJI_IDS["kiss"],
+        ),
+        InlineKeyboardButton(
+            text=label("BTN_VINYL_ALI", "ali"),
+            callback_data="vinyl:ali",
+            style=btn_style("ali"),
+            icon_custom_emoji_id=PREMIUM_EMOJI_IDS["ali"],
         ),
     ],
     [
@@ -2405,7 +2416,15 @@ def build_wiz_color_keyboard(
                 style="primary",
                 icon_custom_emoji_id=PREMIUM_EMOJI_IDS["kiss"],
             ),
+        
         ],
+        [
+            InlineKeyboardButton(
+                text=wiz_label("BTN_VINYL_ALI", "ali"),
+                callback_data=cb("wiz_color:ali"),
+                style="primary",
+                icon_custom_emoji_id=PREMIUM_EMOJI_IDS["ali"],
+    )],   
     ])
 
 
@@ -2471,7 +2490,7 @@ async def on_wiz_color(callback, bot: Bot):
         return
     choice = base.split(":", 1)[1]
     presser_id = callback.from_user.id if callback.from_user else 0
-    if choice in ("green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "koi", "kiss", "default"):
+    if choice in ("green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "koi", "kiss", "default","ali"):
         if limits.is_premium_color(choice) and not user_has_premium_access(presser_id):
             # 🔒 لون مقفل: بالإضافة لتنبيه الـ callback السريع، نرسل رسالة كاملة
             # فيها زر اشتراك، لكل من العربي والإنكليزي حسب لغة الضاغط (tr()
@@ -2784,7 +2803,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
 async def on_vinyl_choice(callback, bot: Bot):
     choice = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id if callback.from_user else 0
-    if choice in ("pink", "blue", "yellow", "red", "green", "bloody", "rose", "emerald", "koi", "kiss", "default"):
+    if choice in ("pink", "blue", "yellow", "red", "green", "bloody", "rose", "emerald", "koi", "kiss", "default","ali"):
         if limits.is_premium_color(choice) and not user_has_premium_access(user_id):
             # 🔒 لون مقفل: تنبيه سريع + رسالة كاملة فيها زر الاشتراك.
             # tr() تختار النص العربي أو الإنكليزي تلقائيًا حسب لغة المستخدم
