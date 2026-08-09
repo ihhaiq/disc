@@ -983,6 +983,19 @@ def get_developer_shadow_path(user_id: int, choice_override: str | None = None) 
     return config.SHADOW_PATH
 
 
+# نسبة قطر الثقب (hole_ratio) اللي تُمرَّر لـ build_disc قابلة للتخصيص لكل
+# لون على حدة، لأن بعض تصاميم القوالب (زي kiss) رسمتها للثقب أصغر بصريًا من
+# باقي الألوان، فنفس HOLE_RATIO العام يخلي الصورة تطلع أكبر من المطلوب عليه
+# تحديدًا. تعديل هذا القاموس لا يؤثر على أي لون ثاني.
+VINYL_HOLE_RATIO_OVERRIDES: dict[str, float] = {
+    "kiss": 0.36,
+}
+
+
+def get_developer_hole_ratio(vinyl_choice: str | None) -> float:
+    return VINYL_HOLE_RATIO_OVERRIDES.get(vinyl_choice, config.HOLE_RATIO)
+
+
 def get_job_priority(user_id: int) -> int:
     return 0 if user_id and user_id == config.DEVELOPER_ID else 1
 
@@ -1087,7 +1100,7 @@ async def process_job(bot: Bot, job: dict) -> None:
             thumb_path,
             get_developer_vinyl_path(uid, vinyl_choice),
             disc_path,
-            config.HOLE_RATIO,
+            get_developer_hole_ratio(vinyl_choice),
             config.DISC_SIZE,
         )
         render_shadow_path = get_developer_shadow_path(uid, vinyl_choice)
@@ -1330,12 +1343,14 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text=label("BTN_VINYL_KOI", "koi"),
             callback_data="vinyl:koi",
-            style=btn_style("koi")
+            style=btn_style("koi"),
+            icon_custom_emoji_id=PREMIUM_EMOJI_IDS["koi"],
         ),
         InlineKeyboardButton(
             text=label("BTN_VINYL_KISS", "kiss"),
             callback_data="vinyl:kiss",
-            style=btn_style("kiss")
+            style=btn_style("kiss"),
+            icon_custom_emoji_id=PREMIUM_EMOJI_IDS["kiss"],
         ),
     ],
     [
@@ -2286,12 +2301,14 @@ def build_wiz_color_keyboard(
             InlineKeyboardButton(
                 text=tr("BTN_VINYL_KOI", user_id),
                 callback_data=cb("wiz_color:koi"),
-                style="primary"
+                style="primary",
+                icon_custom_emoji_id=PREMIUM_EMOJI_IDS["koi"],
             ),
             InlineKeyboardButton(
                 text=tr("BTN_VINYL_KISS", user_id),
                 callback_data=cb("wiz_color:kiss"),
-                style="primary"
+                style="primary",
+                icon_custom_emoji_id=PREMIUM_EMOJI_IDS["kiss"],
             ),
         ],
     ])
