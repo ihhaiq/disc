@@ -15,6 +15,7 @@ from aiogram.types import (
     Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
     LabeledPrice, PreCheckoutQuery, MessageEntity,
     InputRichMessage, ReplyParameters, InputMediaPhoto,
+    InputRichBlockSlideshow, InputRichBlockPhoto, RichBlockCaption,
 )
 
 from compose import build_disc
@@ -1378,9 +1379,11 @@ VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
 async def send_vinyl_color_gallery(bot: Bot, chat_id: int, user_id: int = 0,
                                     reply_to_message_id: int | None = None) -> None:
     """
-    يرسل ألبوم صور (Media Group) لكل قوالب الأقراص المتاحة مع اسم كل لون
-    كـ caption، عشان المستخدم يشوف شكل اللون فعليًا قبل ما يختاره من الأزرار.
-    حد تليكرام لكل Media Group هو 10 عناصر، فنقسّم القائمة لدفعات لو تجاوزت.
+    يرسل معاينة كل قوالب الأقراص المتاحة بنمط كاروسيل (Rich Message
+    Slideshow — وسم <tg-slideshow> بتليكرام)، بحيث يقدر المستخدم يسحب
+    بين الصور بدل ما توصله كألبوم صور منفصلة. كل صورة تحمل اسم اللون
+    كـ caption. حد تليكرام لعدد عناصر الـ slideshow هو 10، فنقسّم
+    القائمة لدفعات (رسالة كاروسيل لكل دفعة) لو تجاوزت.
     """
     items: list[tuple[str, str]] = []  # (path, label)
     for value, text_var in VINYL_COLOR_CHOICES:
@@ -1392,20 +1395,24 @@ async def send_vinyl_color_gallery(bot: Bot, chat_id: int, user_id: int = 0,
         return
 
     chunk_size = 10
-    reply_params = ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
     for i in range(0, len(items), chunk_size):
         chunk = items[i:i + chunk_size]
-        media = [
-            InputMediaPhoto(media=FSInputFile(path), caption=label)
+        slides = [
+            InputRichBlockPhoto(
+                photo=InputMediaPhoto(media=FSInputFile(path)),
+                caption=RichBlockCaption(text=label),
+            )
             for path, label in chunk
         ]
+        slideshow_block = InputRichBlockSlideshow(blocks=slides)
         try:
-            await bot.send_media_group(
-                chat_id, media,
-                reply_parameters=reply_params if i == 0 else None,
+            await send_rich_message(
+                bot, chat_id,
+                blocks=[slideshow_block],
+                reply_to_message_id=reply_to_message_id if i == 0 else None,
             )
         except Exception:
-            logger.exception("فشل إرسال معاينة الألوان")
+            logger.exception("فشل إرسال معاينة الألوان بنمط الكاروسيل")
             return
 
 
