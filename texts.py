@@ -307,9 +307,10 @@ BTN_VINYL_ALI = "علي رشم"
 BTN_BACK = "🔙 رجوع"
 
 SPEED_LABEL_FULL = "دورة كاملة"
-SPEED_LABEL_8RPM = "8 RPM"
-SPEED_LABEL_33RPM = "33 RPM"
-SPEED_LABEL_45RPM = "45 RPM"
+SPEED_LABEL_8RPM = "8 دورة في الدقيقة"
+SPEED_LABEL_19RPM = " 19 دورة في الدقيقة "
+SPEED_LABEL_33RPM = "33 دورة في الدقيقة"
+SPEED_LABEL_45RPM = "45 دورة في الدقيقة"
 
 # ============================================================
 # handlers.py / limits.py - الحد اليومي + اشتراك نجوم تليكرام
@@ -401,6 +402,7 @@ TEXTS_EN: dict[str, str] = {
     "BTN_BACK": "🔙 Back",
     "SPEED_LABEL_FULL": "Full turn",
     "SPEED_LABEL_8RPM": "8 RPM",
+    "SPEED_LABEL_19RPM" : "19 RPM",
     "SPEED_LABEL_33RPM": "33 RPM",
     "SPEED_LABEL_45RPM": "45 RPM",
     "MSG_VINYL_COLOR_INFO": (
