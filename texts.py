@@ -223,6 +223,21 @@ MSG_JOB_QUEUED = (
 MSG_QUEUE_CANCELED_EDIT = "🗑️ تم إلغاء الأعمال المعلقة لهذا المستخدم وإخلاء الطابور الخاص به."
 MSG_QUEUE_CANCELED_ANSWER = "✅ تم إلغاء الطلبات المعلقة"
 
+# --- الطابور المرئي ---
+MSG_QUEUE_POSITION_NEXT = "🔜 دورك جاي! بيبدأ العمل على طلبك خلال لحظات."
+MSG_QUEUE_POSITION_FMT = "📊 أنت بالمرتبة {position} بالطابور، وراح نبدأ فور ما يخلص اللي قبلك."
+
+# --- المعاينة السريعة ---
+BTN_WIZ_PREVIEW = "🔍 معاينة سريعة (٣ ثواني)"
+MSG_PREVIEW_STARTING = "🔍 جارٍ تجهيز معاينة سريعة (٣ ثواني بجودة مخفّضة)..."
+MSG_PREVIEW_READY_CAPTION = "🔍 هذي معاينة سريعة بجودة منخفضة (٣ ثواني) — النسخة النهائية بجودة كاملة."
+BTN_WIZ_CONFIRM_FULL = "🚀 إنشاء الفيديو الكامل"
+MSG_WIZ_REVIEW = "✅ جاهزين! تقدر تطلب معاينة سريعة أولاً، أو تنشئ الفيديو الكامل مباشرة."
+
+# --- معاينة الألوان (قبل الاختيار) ---
+BTN_VINYL_COLOR_PREVIEW = "🖼 شوف كل الألوان (معاينة)"
+MSG_VINYL_COLOR_PREVIEW_SENT = "☝️ هذي صورة كل الأقراص المتوفرة، اختر اللي يعجبك من الأزرار تحت."
+
 MSG_SEND_IMAGE_NOW = "📷 أرسل لي الصورة الآن وسأستخدمها مع الملف الصوتي."
 MSG_NO_PENDING_AUDIO = "⚠️ لا يوجد ملف صوتي معلق مرتبط بهذه الصورة بعد."
 MSG_AUDIO_EXPIRED = "⏰ انتهت مدة انتظار الملف الصوتي. أرسل الملف الصوتي مرة أخرى."
@@ -301,7 +316,7 @@ BTN_VINYL_ROSE = "ROSE💮"
 BTN_VINYL_GREEN = "اخضر تجريبي"
 BTN_VINYL_BLOODY = "🩸"
 BTN_VINYL_EMERALD = "EMERALD"
-BTN_VINYL_KOI = " "
+BTN_VINYL_KOI = "KOI"
 BTN_VINYL_KISS = "KISS"
 BTN_VINYL_ALI = "علي رشم"
 BTN_BACK = "🔙 رجوع"
@@ -396,7 +411,7 @@ TEXTS_EN: dict[str, str] = {
     "BTN_VINYL_GREEN": "Green (beta)",
     "BTN_VINYL_BLOODY": "🩸",
     "BTN_VINYL_ROSE" : "💮 ROSE",
-    "BTN_VINYL_KOI": " ",
+    "BTN_VINYL_KOI": "KOI",
     "BTN_VINYL_KISS": "KISS",
     "BTN_VINYL_ALI": "ALI",
     "BTN_BACK": "🔙 Back",
@@ -430,6 +445,15 @@ TEXTS_EN: dict[str, str] = {
     ),
     "MSG_QUEUE_CANCELED_EDIT": "🗑️ Your pending jobs were canceled and your queue was cleared.",
     "MSG_QUEUE_CANCELED_ANSWER": "✅ Pending requests canceled",
+    "MSG_QUEUE_POSITION_NEXT": "🔜 You're up next! Work on your request starts in a moment.",
+    "MSG_QUEUE_POSITION_FMT": "📊 You're number {position} in the queue, we'll start once it's your turn.",
+    "BTN_WIZ_PREVIEW": "🔍 Quick preview (3s)",
+    "MSG_PREVIEW_STARTING": "🔍 Preparing a quick low-quality preview (3 seconds)...",
+    "MSG_PREVIEW_READY_CAPTION": "🔍 This is a quick low-quality preview (3s) — the final version will be full quality.",
+    "BTN_WIZ_CONFIRM_FULL": "🚀 Create the full video",
+    "MSG_WIZ_REVIEW": "✅ All set! You can request a quick preview first, or create the full video right away.",
+    "BTN_VINYL_COLOR_PREVIEW": "🖼 See all colors (preview)",
+    "MSG_VINYL_COLOR_PREVIEW_SENT": "☝️ Here's a picture of every available disc, pick the one you like from the buttons below.",
     "MSG_SEND_IMAGE_NOW": "📷 Send me the image now and I'll use it with the audio file.",
     "MSG_NO_PENDING_AUDIO": "⚠️ No pending audio file linked to this image yet.",
     "MSG_AUDIO_EXPIRED": "⏰ The audio file wait time expired. Please send the audio file again.",

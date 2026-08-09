@@ -18,7 +18,7 @@ from aiogram.types import (
 )
 
 from compose import build_disc
-from processor import get_duration, render_vinyl
+from processor import get_duration, render_vinyl, render_preview
 import config
 import limits
 import texts as texts_module
@@ -175,7 +175,12 @@ def load_custom_texts_into_memory() -> None:
 
 job_queue: asyncio.Queue[dict] = asyncio.Queue()
 developer_job_queue: asyncio.Queue[dict] = asyncio.Queue()
-worker_task: asyncio.Task | None = None
+# عدة workers شغّالين بالتوازي (بعدد config.MAX_CONCURRENT_JOBS) بدل واحد فقط
+worker_tasks: list[asyncio.Task] = []
+# نتتبع ترتيب job_id يدويًا بطابور واحد موحّد (FIFO حسب وقت الدخول)، لأن
+# asyncio.Queue لا تدعم peek/index مباشرة ونحتاج نعرف "دور" أي طلب وهو منتظر
+# لعرضه للمستخدم (طابور مرئي).
+queue_order: list[str] = []
 pending_images: dict[int, dict] = {}
 pending_audio: dict[int, dict] = {}
 user_rotation_seconds: dict[int, float | None] = {}
@@ -361,7 +366,7 @@ CHANNEL_RESULT_EMOJI = "💌"
 # دعم إيموجي بريميوم (Telegram Premium Custom Emoji)
 # ============================================================
 PREMIUM_EMOJI_IDS = {
-    "emerald": "5285265490350972397", "koi": "6035110735204327381", "kiss": "5474525960143385880", "ali": "5460737770798489825", "black" : "5399878127163811970"
+    "emerald": "5285265490350972397", "koi": "5339487433828353468", "kiss": "5474525960143385880", "ali": "5460737770798489825", "black" : "5399878127163811970"
 }
 USE_PREMIUM_EMOJI = bool(PREMIUM_EMOJI_IDS)
 
@@ -899,10 +904,22 @@ HEADER_EMOJI_CHAR = "🤩"
 RICH_STATUS_HEADER_TEXT = "جاري المعالجة"  # نص ثابت — عدّله حسب رغبتك
 
 
+def _format_eta_seconds(seconds: float) -> str:
+    """يحوّل عدد الثواني لنص عربي مختصر ومقروء (مثلاً: '١ دقيقة و١٠ث' → نكتبها إنجليزي أرقام لسهولة)."""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}ث"
+    minutes, secs = divmod(seconds, 60)
+    if secs == 0:
+        return f"{minutes}د"
+    return f"{minutes}د {secs}ث"
+
+
 def render_rich_status_html(
     percent: float | None,
     intro_text: str,
     stage_icons: list[str] | None = None,
+    eta_seconds: float | None = None,
 ) -> str:
     """
     يبني HTML الرسالة الغنية لعرض حالة المعالجة:
@@ -913,6 +930,8 @@ def render_rich_status_html(
       وكل الإيموجيات (شاملة الحالي) تظهر مظلَّلة باستمرار، والنسبة المئوية تبدأ
       من 0% عند ظهور أول إيموجي مضلل وتستمر بالارتفاع تزامنًا مع تقدّم العملية
       وإضافة كل إيموجي جديد، لحين الاكتمال
+    - سطر أخير اختياري يعرض تقدير الوقت المتبقي (يُحسب خارجيًا بناءً على معدّل
+      التقدّم الفعلي، ويظهر فقط لو عندنا نسبة مئوية أكبر من 0% وأقل من 100%)
     """
     header_emoji_html = f'<tg-emoji emoji-id="{HEADER_EMOJI_ID}">{HEADER_EMOJI_CHAR}</tg-emoji>'
     header = f'{header_emoji_html} {escape_rich_html(RICH_STATUS_HEADER_TEXT)}'
@@ -932,10 +951,15 @@ def render_rich_status_html(
 
     icons_row = " ".join(row_parts)
 
+    eta_row = ""
+    if eta_seconds is not None and 0 < percent < 100:
+        eta_row = f'<tr><td align="left" valign="middle">⏳ {escape_rich_html(_format_eta_seconds(eta_seconds))}</td></tr>'
+
     return (
         f"<p>{escape_rich_html(intro_text)}</p>"
         f'<table bordered striped><tr><th align="center" valign="middle">{header}</th></tr>'
-        f'<tr><td align="left" valign="middle">{icons_row}</td></tr></table>'
+        f'<tr><td align="left" valign="middle">{icons_row}</td></tr>'
+        f'{eta_row}</table>'
     )
 
 
@@ -1011,6 +1035,10 @@ class StatusAnimator:
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._rich_supported = True
+        # لحساب تقدير الوقت المتبقي (ETA) بناءً على معدّل التقدّم الفعلي، لا
+        # نبدأ التوقيت إلا من أول مرة توصل نسبة > 0 (قبلها ما فيه تقدّم يُقاس عليه)
+        self._progress_start_time: float | None = None
+        self.eta_seconds: float | None = None
 
     def set_stage(self, stage_text: str, percent: float | None = None) -> None:
         if stage_text != self._last_stage_text:
@@ -1021,11 +1049,19 @@ class StatusAnimator:
         # ما نصفّر النسبة بين المراحل اللي ما تمرر نسبة صريحة — تضل محتفظة بآخر قيمة
         # وتستمر بالارتفاع بدل ما تختفي/ترجع None
         if percent is not None:
+            if percent > 0 and self._progress_start_time is None:
+                self._progress_start_time = time.time()
             self.percent = percent
+            if self._progress_start_time is not None and 0 < percent < 100:
+                elapsed = time.time() - self._progress_start_time
+                estimated_total = elapsed / (percent / 100)
+                self.eta_seconds = max(0.0, estimated_total - elapsed)
+            elif percent >= 100:
+                self.eta_seconds = 0.0
 
     def _render_html(self) -> str:
         intro = tr("MSG_RICH_STATUS_INTRO", self.user_id)
-        return render_rich_status_html(self.percent, intro, self.stage_icons)
+        return render_rich_status_html(self.percent, intro, self.stage_icons, eta_seconds=self.eta_seconds)
 
     async def _push_update(self) -> None:
         html_content = self._render_html()
@@ -1124,50 +1160,99 @@ async def download_with_retries(bot: Bot, file_id: str, destination: str,
         raise last_error
 
 
-async def start_job_worker(bot: Bot) -> None:
-    global worker_task
-    if worker_task is not None and not worker_task.done():
+def get_queue_position(job_id: str) -> int:
+    """
+    يرجّع "دور" الطلب بالطابور المرئي:
+    - 0  → الطلب مو بالطابور (يعالَج الآن فعليًا، أو خلص، أو غير موجود أصلاً)
+    - 1  → التالي مباشرة (يبدأ فور ما يفرغ أي worker)
+    - N  → فيه N-1 طلب قبله
+    """
+    try:
+        return queue_order.index(job_id) + 1
+    except ValueError:
+        return 0
+
+
+def _queue_position_text(uid, job_id: str) -> str | None:
+    """نص جاهز للعرض يوضّح دور المستخدم بالطابور، أو None لو صار دوره فورًا."""
+    display_uid = uid if isinstance(uid, int) else 0
+    pos = get_queue_position(job_id)
+    if pos <= 0:
+        return None
+    if pos == 1:
+        return tr("MSG_QUEUE_POSITION_NEXT", display_uid)
+    return tr("MSG_QUEUE_POSITION_FMT", display_uid).format(position=pos)
+
+
+async def notify_queue_position(bot: Bot, chat_id: int, uid, job_id: str) -> None:
+    """
+    يرسل رسالة قصيرة توضح ترتيب الطلب بالطابور. مقتصر على المحادثات الخاصة
+    فقط (بدون قنوات/مجموعات) تفاديًا لتعقيد الرسائل المؤقتة (Ephemeral) هناك.
+    """
+    if _is_shared_context(uid):
         return
+    text = _queue_position_text(uid, job_id)
+    if text is None:
+        return
+    try:
+        await bot.send_message(chat_id, text)
+    except Exception:
+        logger.exception("فشل إرسال رسالة موقع الطابور")
 
-    async def _worker() -> None:
-        while True:
-            queue = None
+
+async def start_job_worker(bot: Bot) -> None:
+    """
+    يشغّل عدة workers بالتوازي (بعدد config.MAX_CONCURRENT_JOBS) بدل واحد
+    فقط، عشان نستفيد فعليًا من هذا المتغيّر بدل ما يبقى معرّف بدون استخدام.
+    """
+    global worker_tasks
+    worker_tasks = [t for t in worker_tasks if not t.done()]
+    needed = max(1, config.MAX_CONCURRENT_JOBS) - len(worker_tasks)
+    for _ in range(needed):
+        worker_tasks.append(asyncio.create_task(_job_worker_loop(bot)))
+
+
+async def _job_worker_loop(bot: Bot) -> None:
+    while True:
+        queue = None
+        try:
+            job = developer_job_queue.get_nowait()
+            queue = developer_job_queue
+        except asyncio.QueueEmpty:
             try:
-                job = developer_job_queue.get_nowait()
-                queue = developer_job_queue
+                job = job_queue.get_nowait()
+                queue = job_queue
             except asyncio.QueueEmpty:
-                try:
-                    job = job_queue.get_nowait()
-                    queue = job_queue
-                except asyncio.QueueEmpty:
-                    await asyncio.sleep(0.1)
-                    continue
+                await asyncio.sleep(0.1)
+                continue
 
-            try:
-                job_id = job.get("job_id")
-                if job_id in canceled_job_ids:
-                    canceled_job_ids.discard(job_id)
-                    tracked_jobs.pop(job_id, None)
-                    user_pending_jobs.get(job.get("uid", 0), set()).discard(job_id)
-                    continue
+        job_id = job.get("job_id")
+        # الطلب بدأ يُعالَج فعليًا الآن ← يطلع من طابور العرض المرئي
+        if job_id in queue_order:
+            queue_order.remove(job_id)
 
-                tracked_jobs[job_id] = job
-                try:
-                    await asyncio.wait_for(process_job(bot, job), timeout=JOB_TIMEOUT_SECONDS)
-                except asyncio.TimeoutError:
-                    # process_job نفسها تكون قد أرسلت رسالة توضيحية للمستخدم
-                    # ونظّفت ملفاتها المؤقتة (عبر معالجة CancelledError بداخلها
-                    # + finally). هنا بس نكمل للطلب التالي بدل ما نوقف الطابور.
-                    logger.warning(texts_module.LOG_JOB_TIMEOUT)
-            except Exception:
-                logger.exception(texts_module.LOG_QUEUE_PROCESS_FAILED)
-            finally:
+        try:
+            if job_id in canceled_job_ids:
+                canceled_job_ids.discard(job_id)
                 tracked_jobs.pop(job_id, None)
                 user_pending_jobs.get(job.get("uid", 0), set()).discard(job_id)
-                if queue is not None:
-                    queue.task_done()
+                continue
 
-    worker_task = asyncio.create_task(_worker())
+            tracked_jobs[job_id] = job
+            try:
+                await asyncio.wait_for(process_job(bot, job), timeout=JOB_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                # process_job نفسها تكون قد أرسلت رسالة توضيحية للمستخدم
+                # ونظّفت ملفاتها المؤقتة (عبر معالجة CancelledError بداخلها
+                # + finally). هنا بس نكمل للطلب التالي بدل ما نوقف الطابور.
+                logger.warning(texts_module.LOG_JOB_TIMEOUT)
+        except Exception:
+            logger.exception(texts_module.LOG_QUEUE_PROCESS_FAILED)
+        finally:
+            tracked_jobs.pop(job_id, None)
+            user_pending_jobs.get(job.get("uid", 0), set()).discard(job_id)
+            if queue is not None:
+                queue.task_done()
 
 
 def get_user_rotation_seconds(user_id: int) -> float | None:
@@ -1290,6 +1375,40 @@ VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
 ]
 
 
+async def send_vinyl_color_gallery(bot: Bot, chat_id: int, user_id: int = 0,
+                                    reply_to_message_id: int | None = None) -> None:
+    """
+    يرسل ألبوم صور (Media Group) لكل قوالب الأقراص المتاحة مع اسم كل لون
+    كـ caption، عشان المستخدم يشوف شكل اللون فعليًا قبل ما يختاره من الأزرار.
+    حد تليكرام لكل Media Group هو 10 عناصر، فنقسّم القائمة لدفعات لو تجاوزت.
+    """
+    items: list[tuple[str, str]] = []  # (path, label)
+    for value, text_var in VINYL_COLOR_CHOICES:
+        path = get_developer_vinyl_path(0, value)
+        if os.path.exists(path):
+            items.append((path, tr(text_var, user_id) or value))
+
+    if not items:
+        return
+
+    chunk_size = 10
+    reply_params = ReplyParameters(message_id=reply_to_message_id) if reply_to_message_id else None
+    for i in range(0, len(items), chunk_size):
+        chunk = items[i:i + chunk_size]
+        media = [
+            InputMediaPhoto(media=FSInputFile(path), caption=label)
+            for path, label in chunk
+        ]
+        try:
+            await bot.send_media_group(
+                chat_id, media,
+                reply_parameters=reply_params if i == 0 else None,
+            )
+        except Exception:
+            logger.exception("فشل إرسال معاينة الألوان")
+            return
+
+
 def user_has_premium_access(user_id: int) -> bool:
     """
     يرجّع True لو المستخدم يقدر يستخدم الألوان المدفوعة: مشترك فعليًا
@@ -1317,8 +1436,9 @@ def build_buy_stars_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
 
 def enqueue_job(job: dict) -> None:
     uid = job.get("uid", 0)
-    if uid != config.DEVELOPER_ID:
+    if uid != config.DEVELOPER_ID and not job.get("is_preview"):
         limits.record_usage(uid)
+    queue_order.append(job["job_id"])
     if get_job_priority(uid) == 0:
         developer_job_queue.put_nowait(job)
     else:
@@ -1332,6 +1452,8 @@ def cancel_user_jobs(user_id: int) -> None:
         job = tracked_jobs.pop(job_id, None)
         if job:
             cleanup(*job.get("temp_paths", []))
+        if job_id in queue_order:
+            queue_order.remove(job_id)
 
 
 async def process_job(bot: Bot, job: dict) -> None:
@@ -1670,6 +1792,13 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
             style=btn_style("ali"),
             icon_custom_emoji_id=PREMIUM_EMOJI_IDS["ali"],
         ),
+    ],
+    [
+        InlineKeyboardButton(
+            text=tr("BTN_VINYL_COLOR_PREVIEW", user_id),
+            callback_data="vinyl_menu:preview",
+            style="default",
+        )
     ],
     [
         InlineKeyboardButton(
@@ -2461,6 +2590,13 @@ async def on_vinyl_menu_open(callback, bot: Bot):
     await callback.answer()
 
 
+@router.callback_query(F.data == "vinyl_menu:preview")
+async def on_vinyl_menu_preview(callback, bot: Bot):
+    user_id = callback.from_user.id if callback.from_user else 0
+    await callback.answer(tr("MSG_VINYL_COLOR_PREVIEW_SENT", user_id))
+    await send_vinyl_color_gallery(bot, callback.message.chat.id, user_id)
+
+
 @router.callback_query(F.data == "vinyl_menu:back")
 async def on_vinyl_menu_back(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
@@ -2653,6 +2789,11 @@ async def _launch_job(bot: Bot, uid: int, job: dict) -> None:
     tracked_jobs[job["job_id"]] = job
     user_pending_jobs.setdefault(owner_id, set()).add(job["job_id"])
     enqueue_job(job)
+    # طابور مرئي: نخبر المستخدم بترتيبه لو فيه طلبات قبله (بالخاص فقط)
+    context_key = job.get("context_key", uid)
+    message = job.get("message")
+    if message is not None:
+        await notify_queue_position(bot, message.chat.id, context_key, job["job_id"])
 
 
 @router.callback_query(F.data.startswith("mode:quick"))
@@ -2827,7 +2968,13 @@ def build_wiz_color_keyboard(
                 callback_data=cb("wiz_color:ali"),
                 style="primary",
                 icon_custom_emoji_id=PREMIUM_EMOJI_IDS["ali"],
-    )],   
+    )],
+    [
+        InlineKeyboardButton(
+            text=tr("BTN_VINYL_COLOR_PREVIEW", user_id),
+            callback_data=cb("wiz_color:preview"),
+        )
+    ],
     ])
 
 
@@ -2898,6 +3045,11 @@ async def on_wiz_color(callback, bot: Bot):
         return
     choice = base.split(":", 1)[1]
     presser_id = callback.from_user.id if callback.from_user else 0
+    if choice == "preview":
+        # زر معاينة كل الألوان: يرسل ألبوم صور بدون التأثير على حالة الـ wizard إطلاقًا
+        await callback.answer(tr("MSG_VINYL_COLOR_PREVIEW_SENT", presser_id))
+        await send_vinyl_color_gallery(bot, callback.message.chat.id, presser_id)
+        return
     if choice in ("green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "koi", "kiss", "default","ali"):
         if limits.is_premium_color(choice) and not user_has_premium_access(presser_id):
             # 🔒 لون مقفل: بالإضافة لتنبيه الـ callback السريع، نرسل رسالة كاملة
@@ -3019,25 +3171,125 @@ async def _finish_wizard(bot: Bot, uid, send_func, segment_start: float) -> None
     job["vinyl_choice"] = developer_vinyl_choice.get(uid)
     job["rotation_seconds"] = user_rotation_seconds.get(uid, config.ROTATION_SECONDS)
 
-    starting_text = tr("MSG_WIZ_STARTING", owner_id)
-    entities = build_premium_entities_from_text(starting_text)
-
     if _is_group_context(uid):
         # نفس رسالة الـEphemeral تستمر من الـWizard إلى مراحل المعالجة.
         # لا ننشئ رسالة ثانية؛ process_job سيحدّث هذه الرسالة نفسها.
         job["status_ephemeral_message_id"] = _ephemeral_id(pending)
-    else:
-        if entities:
-            sent = await send_func(starting_text, entities=entities)
-        else:
-            sent = await send_func(starting_text)
+        await _launch_job(bot, owner_id, job)
+        return
 
-        if _is_shared_context(uid) and sent is not None:
+    if _is_channel_context(uid):
+        starting_text = tr("MSG_WIZ_STARTING", owner_id)
+        entities = build_premium_entities_from_text(starting_text)
+        sent = await send_func(starting_text, entities=entities) if entities else await send_func(starting_text)
+        if sent is not None:
             job.setdefault("channel_msg_ids", [])
             if sent.message_id not in job["channel_msg_ids"]:
                 job["channel_msg_ids"].append(sent.message_id)
+        await _launch_job(bot, owner_id, job)
+        return
 
-    await _launch_job(bot, owner_id, job)
+    # محادثة خاصة عادية: بدل الإطلاق الفوري، نعرض شاشة مراجعة تتيح للمستخدم
+    # طلب معاينة سريعة (٣ ثواني بجودة منخفضة) قبل ما يقرر إنشاء الفيديو الكامل.
+    pending_confirm[owner_id] = job
+    await send_func(
+        tr("MSG_WIZ_REVIEW", owner_id),
+        reply_markup=build_wiz_confirm_keyboard(owner_id),
+    )
+
+
+pending_confirm: dict[int, dict] = {}
+
+
+def build_wiz_confirm_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=tr("BTN_WIZ_PREVIEW", user_id), callback_data="wiz_preview_confirm")],
+        [InlineKeyboardButton(text=tr("BTN_WIZ_CONFIRM_FULL", user_id), callback_data="wiz_full_confirm", style="success")],
+        [InlineKeyboardButton(text=tr("BTN_CANCEL", user_id), callback_data="cancel_queue")],
+    ])
+
+
+async def _run_quick_preview(bot: Bot, target_message: Message, uid: int, job: dict) -> None:
+    """
+    يولّد معاينة سريعة (٣ ثواني، دقة منخفضة) بنفس إعدادات المستخدم المختارة
+    (اللون/السرعة/الصورة/المقطع) ويرسلها كفيديو عادي — مو Video Note — عشان
+    يتأكد المستخدم من الشكل قبل ما ينتظر الإنتاج الكامل.
+    """
+    audio = job["audio"]
+    job_id = job["job_id"]
+    ext = audio.file_name.split(".")[-1] if audio.file_name else "mp3"
+    preview_audio_path = tmp(f"preview_{uid}_{job_id}_audio.{ext}")
+    preview_thumb_path = tmp(f"preview_{uid}_{job_id}_thumb.jpg")
+    preview_disc_path = tmp(f"preview_{uid}_{job_id}_disc.png")
+    preview_out_path = tmp(f"preview_{uid}_{job_id}_out.mp4")
+
+    try:
+        await bot.send_chat_action(target_message.chat.id, action=ChatAction.UPLOAD_VIDEO)
+        await download_with_retries(bot, audio.file_id, preview_audio_path, timeout_seconds=180, retries=2)
+
+        thumbnail_file_id = job.get("thumbnail_file_id")
+        if not thumbnail_file_id and getattr(audio, "thumbnail", None) is not None:
+            thumbnail_file_id = audio.thumbnail.file_id
+        if not thumbnail_file_id:
+            await target_message.reply(texts_module.ERR_NO_THUMBNAIL_AVAILABLE)
+            return
+        await download_with_retries(bot, thumbnail_file_id, preview_thumb_path, timeout_seconds=60, retries=2)
+
+        vinyl_choice = job.get("vinyl_choice")
+        await asyncio.to_thread(
+            build_disc, preview_thumb_path, get_developer_vinyl_path(uid, vinyl_choice),
+            preview_disc_path, get_developer_hole_ratio(vinyl_choice), config.DISC_SIZE,
+        )
+        shadow_path = get_developer_shadow_path(uid, vinyl_choice)
+
+        await render_preview(
+            preview_disc_path, shadow_path, preview_audio_path, preview_out_path,
+            rotation_seconds=job.get("rotation_seconds", get_user_rotation_seconds(uid)),
+            native_size=config.DISC_SIZE,
+            start_offset=job.get("segment_start", 0.0),
+        )
+
+        await target_message.reply_video(
+            FSInputFile(preview_out_path),
+            caption=tr("MSG_PREVIEW_READY_CAPTION", uid),
+            reply_markup=build_wiz_confirm_keyboard(uid),
+        )
+    except Exception:
+        logger.exception("فشل توليد المعاينة السريعة")
+        try:
+            await target_message.reply(tr("MSG_PROCESSING_ERROR_FMT", uid).format(error_text="preview failed"))
+        except Exception:
+            pass
+    finally:
+        cleanup(preview_audio_path, preview_thumb_path, preview_disc_path, preview_out_path)
+
+
+@router.callback_query(F.data == "wiz_preview_confirm")
+async def on_wiz_preview_confirm(callback, bot: Bot):
+    uid = callback.from_user.id if callback.from_user else 0
+    job = pending_confirm.get(uid)
+    if not job:
+        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
+        return
+    await callback.answer(tr("MSG_PREVIEW_STARTING", uid))
+    await _run_quick_preview(bot, callback.message, uid, job)
+
+
+@router.callback_query(F.data == "wiz_full_confirm")
+async def on_wiz_full_confirm(callback, bot: Bot):
+    uid = callback.from_user.id if callback.from_user else 0
+    job = pending_confirm.pop(uid, None)
+    if not job:
+        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
+        return
+    await callback.answer()
+    starting_text = tr("MSG_WIZ_STARTING", uid)
+    entities = build_premium_entities_from_text(starting_text)
+    if entities:
+        await callback.message.reply(starting_text, entities=entities)
+    else:
+        await callback.message.reply(starting_text)
+    await _launch_job(bot, uid, job)
 
 
 @router.callback_query(F.data.startswith("cancel_queue"))
@@ -3060,6 +3312,8 @@ async def on_cancel_queue(callback, bot: Bot):
         await edit_text_variable(callback.message, bot, "MSG_QUEUE_CANCELED_EDIT", uid)
     pending_audio.pop(uid, None)
     wizard_state.pop(uid, None)
+    if isinstance(uid, int):
+        pending_confirm.pop(uid, None)
     await callback.answer(tr("MSG_QUEUE_CANCELED_ANSWER", uid))
 
 

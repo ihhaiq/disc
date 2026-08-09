@@ -9,7 +9,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 if not BOT_TOKEN:
     raise RuntimeError(ERR_MISSING_BOT_TOKEN)
 
-MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", 3))
+MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", 2))
 DEVELOPER_ID = int(os.environ.get("DEVELOPER_ID", 0))
 ROTATION_SECONDS = float(os.environ.get("ROTATION_SECONDS", 4))
 OUTPUT_FPS = int(os.environ.get("OUTPUT_FPS", 30))

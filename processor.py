@@ -51,6 +51,84 @@ def compute_bitrate_budget(duration: float) -> tuple[int, int]:
     return video_bps, audio_bps
 
 
+async def render_preview(disc_path: str, shadow_path: str, audio_path: str, out_path: str,
+                          rotation_seconds: float | None = 4, native_size: int = 640,
+                          output_size: int = 320, fps: int = 15, preview_duration: float = 3.0,
+                          start_offset: float = 0.0) -> str:
+    """
+    نسخة سريعة وخفيفة من render_vinyl، مخصّصة للمعاينة السريعة قبل الإنتاج
+    الكامل: مدة قصيرة ثابتة (preview_duration)، دقة أصغر (output_size)،
+    وبترّيت منخفض ثابت (بدل حساب ميزانية دقيقة حسب حد تليكرام). الهدف هنا
+    سرعة التوليد، مو حجم/جودة نهائية — الفيديو يُرسل كفيديو عادي (مو Video
+    Note) فحد الـ12 ميجا لا ينطبق عليه أصلاً.
+    """
+    full_duration = await get_duration(audio_path)
+    start_offset = max(0.0, min(start_offset, max(0.0, full_duration - 1)))
+    remaining = max(0.0, full_duration - start_offset)
+    duration = min(remaining, preview_duration) if remaining > 0 else preview_duration
+    duration = max(duration, 1.0)
+
+    if rotation_seconds is None or rotation_seconds <= 0:
+        rotation_seconds = duration if duration > 0 else 4
+
+    trimmed_audio_path = audio_path + ".preview.mp3"
+    trim_cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(start_offset),
+        "-i", audio_path,
+        "-vn",
+        "-acodec", "libmp3lame",
+        "-t", str(duration),
+        trimmed_audio_path,
+    ]
+    trim_proc = await asyncio.create_subprocess_exec(
+        *trim_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+    )
+    _, trim_err = await trim_proc.communicate()
+    if trim_proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg preview trim failed: {trim_err.decode()[-500:]}")
+
+    filt = (
+        f"[1:v]format=rgba,rotate=2*PI*t/{rotation_seconds}:c=none:ow={native_size}:oh={native_size}[spin];"
+        f"[spin][2:v]overlay=0:0:format=auto[merged];"
+        f"[merged]scale={output_size}:{output_size}[vout]"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", trimmed_audio_path,
+        "-loop", "1", "-i", disc_path,
+        "-loop", "1", "-i", shadow_path,
+        "-filter_complex", filt,
+        "-map", "[vout]", "-map", "0:a",
+        "-c:v", "libx264", "-preset", "ultrafast",
+        "-b:v", "400k",
+        "-c:a", "aac", "-b:a", "64k",
+        "-t", str(duration),
+        "-r", str(fps),
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        out_path,
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+        )
+        _, err = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg preview render failed: {err.decode()[-500:]}")
+    finally:
+        # ملف الصوت المقتوص وسيط داخلي فقط، احذفه دايمًا سواء نجحت المعالجة أو فشلت
+        if os.path.exists(trimmed_audio_path):
+            try:
+                os.remove(trimmed_audio_path)
+            except OSError:
+                pass
+
+    return out_path
+
+
 async def render_vinyl(disc_path: str, shadow_path: str, audio_path: str,
                         out_path: str, rotation_seconds: float | None = 4,
                         size: int = 640, fps: int = 30,
