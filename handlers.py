@@ -1251,7 +1251,7 @@ def build_customize_keyboard(user_id: int) -> InlineKeyboardMarkup:
     labels = [
         (tr("SPEED_LABEL_FULL", user_id), "full"),
         (tr("SPEED_LABEL_8RPM", user_id), "8"),        
-        (tr("SPEED_LABEL_45RPM", user_id), "19),
+        (tr("SPEED_LABEL_45RPM", user_id), "19"),
         (tr("SPEED_LABEL_33RPM", user_id), "33"),
         (tr("SPEED_LABEL_45RPM", user_id), "45"),
     ]
