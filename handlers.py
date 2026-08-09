@@ -2473,7 +2473,14 @@ async def on_wiz_color(callback, bot: Bot):
     presser_id = callback.from_user.id if callback.from_user else 0
     if choice in ("green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "koi", "kiss", "default"):
         if limits.is_premium_color(choice) and not user_has_premium_access(presser_id):
+            # 🔒 لون مقفل: بالإضافة لتنبيه الـ callback السريع، نرسل رسالة كاملة
+            # فيها زر اشتراك، لكل من العربي والإنكليزي حسب لغة الضاغط (tr()
+            # ترجع النص المناسب تلقائيًا من TEXTS_EN لو لغته إنكليزي).
             await callback.answer(tr("MSG_COLOR_PREMIUM_ONLY", presser_id), show_alert=True)
+            await callback.message.reply(
+                tr("MSG_COLOR_PREMIUM_ONLY", presser_id),
+                reply_markup=build_buy_stars_keyboard(presser_id),
+            )
             return
         if choice == "default":
             developer_vinyl_choice.pop(uid, None)
@@ -2779,7 +2786,14 @@ async def on_vinyl_choice(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
     if choice in ("pink", "blue", "yellow", "red", "green", "bloody", "rose", "emerald", "koi", "kiss", "default"):
         if limits.is_premium_color(choice) and not user_has_premium_access(user_id):
+            # 🔒 لون مقفل: تنبيه سريع + رسالة كاملة فيها زر الاشتراك.
+            # tr() تختار النص العربي أو الإنكليزي تلقائيًا حسب لغة المستخدم
+            # المحفوظة بـ user_language (ar/en)، وكذلك BTN_BUY_STARS.
             await callback.answer(tr("MSG_COLOR_PREMIUM_ONLY", user_id), show_alert=True)
+            await callback.message.reply(
+                tr("MSG_COLOR_PREMIUM_ONLY", user_id),
+                reply_markup=build_buy_stars_keyboard(user_id),
+            )
             return
         if choice == "default":
             developer_vinyl_choice.pop(user_id, None)
