@@ -236,6 +236,22 @@ MSG_VINYL_CHOICE_SAVED_EDIT = "🎨 تم حفظ اختيار قالب القرص
 MSG_VINYL_CHOICE_SAVED_ANSWER = "✅ تم حفظ الاختيار"
 MSG_SPEED_SAVED_ANSWER = "✅ تم حفظ سرعة القرص لهذا المستخدم"
 
+# --- لوحة المطور: تحديد الأقراص المدفوعة (Premium-only colors) ---
+BTN_DEV_LIMITS_MENU = "🔒 الحدود"
+MSG_DEV_LIMITS_HEADER = (
+    "🔒 الأقراص المتوفرة:\n"
+    "اضغط على أي قرص لتبديل حالته بين 🆓 مجاني و 💎 مدفوع.\n"
+    "الأقراص المدفوعة ما تشتغل إلا للمشتركين (أو القائمة البيضاء أو المطور)."
+)
+BTN_DEV_LIMITS_FREE_SUFFIX = "🆓"
+BTN_DEV_LIMITS_PAID_SUFFIX = "💎"
+MSG_DEV_LIMITS_TOGGLED_PAID_FMT = "💎 صار «{name}» قرص مدفوع."
+MSG_DEV_LIMITS_TOGGLED_FREE_FMT = "🆓 صار «{name}» قرص مجاني."
+MSG_COLOR_PREMIUM_ONLY = (
+    "💎 هذا اللون متاح فقط للمشتركين بالاشتراك المدفوع.\n"
+    "اضغط زر الاشتراك بالرسالة الرئيسية لتفعيله."
+)
+
 MSG_WRONG_TYPE = "📌 أرسل ملف صوتي (Audio) وليس فيديو أو مستند، حتى تكو صورته المصغرة موجودة."
 MSG_CHANNEL_ADMIN_ONLY = "🚫 هذا التحكم متاح فقط لمشرفي القناة."
 MSG_CHANNEL_ASK_IMAGE_REPLY = (
@@ -418,6 +434,20 @@ TEXTS_EN: dict[str, str] = {
         "without needing to send it again."
     ),
     "MSG_DEV_ONLY_OPTION": "This option is for the developer only",
+    "BTN_DEV_LIMITS_MENU": "🔒 Limits",
+    "MSG_DEV_LIMITS_HEADER": (
+        "🔒 Available discs:\n"
+        "Tap any disc to toggle it between 🆓 Free and 💎 Paid.\n"
+        "Paid discs only work for subscribers (or whitelist/developer)."
+    ),
+    "BTN_DEV_LIMITS_FREE_SUFFIX": "🆓",
+    "BTN_DEV_LIMITS_PAID_SUFFIX": "💎",
+    "MSG_DEV_LIMITS_TOGGLED_PAID_FMT": "💎 \"{name}\" is now a paid disc.",
+    "MSG_DEV_LIMITS_TOGGLED_FREE_FMT": "🆓 \"{name}\" is now a free disc.",
+    "MSG_COLOR_PREMIUM_ONLY": (
+        "💎 This color is only available for paid subscribers.\n"
+        "Tap the subscribe button on the main message to unlock it."
+    ),
     "MSG_VINYL_CHOICE_SAVED_ANSWER": "✅ Choice saved",
     "MSG_SPEED_SAVED_ANSWER": "✅ Disc speed saved for this user",
     "STAGE_PREPARING": "Preparing",
