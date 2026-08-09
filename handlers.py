@@ -988,7 +988,7 @@ def get_developer_shadow_path(user_id: int, choice_override: str | None = None) 
 # باقي الألوان، فنفس HOLE_RATIO العام يخلي الصورة تطلع أكبر من المطلوب عليه
 # تحديدًا. تعديل هذا القاموس لا يؤثر على أي لون ثاني.
 VINYL_HOLE_RATIO_OVERRIDES: dict[str, float] = {
-    "kiss": 0.36,
+    "kiss": 0.39,
 }
 
 
