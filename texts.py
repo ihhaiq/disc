@@ -235,8 +235,7 @@ BTN_WIZ_CONFIRM_FULL = "🚀 إنشاء الفيديو الكامل"
 MSG_WIZ_REVIEW = "✅ جاهزين! تقدر تطلب معاينة سريعة أولاً، أو تنشئ الفيديو الكامل مباشرة."
 
 # --- معاينة الألوان (قبل الاختيار) ---
-BTN_VINYL_COLOR_PREVIEW = "🖼 شوف كل الألوان (معاينة)"
-MSG_VINYL_COLOR_PREVIEW_SENT = "☝️ هذي صورة كل الأقراص المتوفرة، اختر اللي يعجبك من الأزرار تحت."
+BTN_VINYL_COLOR_PREVIEW = "معاينة"
 
 MSG_SEND_IMAGE_NOW = "📷 أرسل لي الصورة الآن وسأستخدمها مع الملف الصوتي."
 MSG_NO_PENDING_AUDIO = "⚠️ لا يوجد ملف صوتي معلق مرتبط بهذه الصورة بعد."
@@ -452,8 +451,7 @@ TEXTS_EN: dict[str, str] = {
     "MSG_PREVIEW_READY_CAPTION": "🔍 This is a quick low-quality preview (3s) — the final version will be full quality.",
     "BTN_WIZ_CONFIRM_FULL": "🚀 Create the full video",
     "MSG_WIZ_REVIEW": "✅ All set! You can request a quick preview first, or create the full video right away.",
-    "BTN_VINYL_COLOR_PREVIEW": "🖼 See all colors (preview)",
-    "MSG_VINYL_COLOR_PREVIEW_SENT": "☝️ Here's a picture of every available disc, pick the one you like from the buttons below.",
+    "BTN_VINYL_COLOR_PREVIEW": "Preview",
     "MSG_SEND_IMAGE_NOW": "📷 Send me the image now and I'll use it with the audio file.",
     "MSG_NO_PENDING_AUDIO": "⚠️ No pending audio file linked to this image yet.",
     "MSG_AUDIO_EXPIRED": "⏰ The audio file wait time expired. Please send the audio file again.",
