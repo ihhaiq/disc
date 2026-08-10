@@ -6,7 +6,6 @@ import os
 import time
 import uuid
 import re
-# ميو 
 from aiogram import Router, F, Bot
 from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramBadRequest
@@ -15,10 +14,9 @@ from aiogram.types import (
     Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
     LabeledPrice, PreCheckoutQuery, MessageEntity,
     InputRichMessage, ReplyParameters, InputMediaPhoto,
-    InputRichBlockSlideshow, InputRichBlockPhoto, RichBlockCaption,
 )
 
-from compose import build_disc, build_disc_static_preview, build_placeholder_square
+from compose import build_disc
 from processor import get_duration, render_vinyl, render_preview
 import config
 import limits
@@ -110,7 +108,6 @@ def _group_pending_key_for_user(chat_id: int, user_id: int) -> str | None:
         return None
     candidates.sort(reverse=True)
     return candidates[0][1]
-
 
 async def _edit_wizard_text(
     bot: Bot,
@@ -361,6 +358,10 @@ channel_reply_index: dict[tuple[int, int], str] = {}
 
 CHANNEL_RESULT_URL = "http://t.me/discbybot?start=help"
 CHANNEL_RESULT_EMOJI = "💌"
+
+# --- زر "معاينة" (يفتح قناة القوالب مباشرة، بدون أي معالجة داخل البوت) ---
+VINYL_TEMPLATE_PREVIEW_URL = "https://t.me/VinylTemplate"
+PREVIEW_EMOJI_ID = "5904219717073114606"
 
 
 # ============================================================
@@ -1376,101 +1377,6 @@ VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
 ]
 
 
-async def _get_gallery_sample_thumb_path(bot: Bot, user_id: int) -> str:
-    """
-    يجيب صورة عيّنة توضع بوسط كل قوالب معاينة الألوان: يجرّب أول صورة
-    بروفايل المستخدم الحالي، ولو ما عنده يجرّب صورة بروفايل البوت نفسه،
-    ولو ما لقى أي صورة (نادر) يرجع مربع لوني بسيط بدل ما ينهار.
-    الملف يُحمّل لمسار مؤقت بـ TEMP_DIR ومسؤولية الاستدعاء حذفه بعدها.
-    """
-    dest = os.path.join(config.TEMP_DIR, f"gallery_sample_{uuid.uuid4().hex}.jpg")
-
-    for target_id in filter(None, [user_id, None]):
-        try:
-            if target_id:
-                photos = await bot.get_user_profile_photos(target_id, limit=1)
-            else:
-                me = await bot.get_me()
-                photos = await bot.get_user_profile_photos(me.id, limit=1)
-            if photos and photos.photos:
-                file_id = photos.photos[0][-1].file_id
-                await download_with_retries(bot, file_id, dest, timeout_seconds=30, retries=2)
-                return dest
-        except Exception:
-            logger.warning("تعذّر جلب صورة عيّنة (user_id=%s) لمعاينة الألوان", target_id)
-
-    await asyncio.to_thread(build_placeholder_square, dest, config.DISC_SIZE)
-    return dest
-
-
-async def send_vinyl_color_gallery(bot: Bot, chat_id: int, user_id: int = 0,
-                                    reply_to_message_id: int | None = None) -> None:
-    """
-    يرسل معاينة كل قوالب الأقراص المتاحة بنمط كاروسيل واحد (Rich Message
-    Slideshow — وسم <tg-slideshow> بتليكرام)، بحيث يقدر المستخدم يسحب بين
-    كل الصور برسالة وحدة بدل ما توصله كألبومات منفصلة.
-
-    كل صورة بالكاروسيل هي الشكل النهائي الفعلي (القالب + الظل المخصص له
-    + صورة موضوعة داخل الثقب ومقصوصة/جالبة زي التصدير الحقيقي بالضبط)،
-    مو القالب الفارغ. الصورة الموضوعة بالثقب هي صورة بروفايل المستخدم
-    الحالي لو متوفرة، وإلا صورة بروفايل البوت.
-    """
-    items: list[tuple[str, str, str, str]] = []  # (value, vinyl_path, shadow_path, label)
-    for value, text_var in VINYL_COLOR_CHOICES:
-        vinyl_path = get_developer_vinyl_path(0, value)
-        shadow_path = get_developer_shadow_path(0, value)
-        if os.path.exists(vinyl_path) and os.path.exists(shadow_path):
-            items.append((value, vinyl_path, shadow_path, tr(text_var, user_id) or value))
-
-    if not items:
-        return
-
-    sample_thumb_path = await _get_gallery_sample_thumb_path(bot, user_id)
-    preview_paths: list[str] = []
-    labels: list[str] = []
-    try:
-        for value, vinyl_path, shadow_path, label in items:
-            out_path = os.path.join(config.TEMP_DIR, f"gallery_preview_{uuid.uuid4().hex}.png")
-            try:
-                await asyncio.to_thread(
-                    build_disc_static_preview,
-                    sample_thumb_path, vinyl_path, shadow_path, out_path,
-                    get_developer_hole_ratio(value), config.DISC_SIZE,
-                )
-            except Exception:
-                logger.exception("فشل بناء معاينة اللون %s للكاروسيل", label)
-                continue
-            preview_paths.append(out_path)
-            labels.append(label)
-
-        if not preview_paths:
-            return
-
-        slides = [
-            InputRichBlockPhoto(
-                photo=InputMediaPhoto(media=FSInputFile(path)),
-                caption=RichBlockCaption(text=label),
-            )
-            for path, label in zip(preview_paths, labels)
-        ]
-        slideshow_block = InputRichBlockSlideshow(blocks=slides)
-        try:
-            await send_rich_message(
-                bot, chat_id,
-                blocks=[slideshow_block],
-                reply_to_message_id=reply_to_message_id,
-            )
-        except Exception:
-            logger.exception("فشل إرسال معاينة الألوان بنمط الكاروسيل")
-    finally:
-        for path in preview_paths + [sample_thumb_path]:
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except OSError:
-                pass
-
-
 def user_has_premium_access(user_id: int) -> bool:
     """
     يرجّع True لو المستخدم يقدر يستخدم الألوان المدفوعة: مشترك فعليًا
@@ -1858,8 +1764,8 @@ def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
     [
         InlineKeyboardButton(
             text=tr("BTN_VINYL_COLOR_PREVIEW", user_id),
-            callback_data="vinyl_menu:preview",
-            style="default",
+            url=VINYL_TEMPLATE_PREVIEW_URL,
+            icon_custom_emoji_id=PREVIEW_EMOJI_ID,
         )
     ],
     [
@@ -2652,13 +2558,6 @@ async def on_vinyl_menu_open(callback, bot: Bot):
     await callback.answer()
 
 
-@router.callback_query(F.data == "vinyl_menu:preview")
-async def on_vinyl_menu_preview(callback, bot: Bot):
-    user_id = callback.from_user.id if callback.from_user else 0
-    await callback.answer(tr("MSG_VINYL_COLOR_PREVIEW_SENT", user_id))
-    await send_vinyl_color_gallery(bot, callback.message.chat.id, user_id)
-
-
 @router.callback_query(F.data == "vinyl_menu:back")
 async def on_vinyl_menu_back(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
@@ -3034,7 +2933,8 @@ def build_wiz_color_keyboard(
     [
         InlineKeyboardButton(
             text=tr("BTN_VINYL_COLOR_PREVIEW", user_id),
-            callback_data=cb("wiz_color:preview"),
+            url=VINYL_TEMPLATE_PREVIEW_URL,
+            icon_custom_emoji_id=PREVIEW_EMOJI_ID,
         )
     ],
     ])
@@ -3107,11 +3007,6 @@ async def on_wiz_color(callback, bot: Bot):
         return
     choice = base.split(":", 1)[1]
     presser_id = callback.from_user.id if callback.from_user else 0
-    if choice == "preview":
-        # زر معاينة كل الألوان: يرسل ألبوم صور بدون التأثير على حالة الـ wizard إطلاقًا
-        await callback.answer(tr("MSG_VINYL_COLOR_PREVIEW_SENT", presser_id))
-        await send_vinyl_color_gallery(bot, callback.message.chat.id, presser_id)
-        return
     if choice in ("green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "koi", "kiss", "default","ali"):
         if limits.is_premium_color(choice) and not user_has_premium_access(presser_id):
             # 🔒 لون مقفل: بالإضافة لتنبيه الـ callback السريع، نرسل رسالة كاملة
