@@ -9,11 +9,19 @@
 import json
 import logging
 import os
+import threading
 import time
 
 import config
 
 logger = logging.getLogger(__name__)
+
+# قفل عام يحمي كل عمليات القراءة-تعديل-حفظ (read-modify-write) على ملف
+# usage_limits.json من التداخل، خصوصًا الآن بعد وجود عدة workers متوازية
+# (MAX_CONCURRENT_JOBS) قد تستدعي record_usage/toggle_premium_color/... بنفس
+# اللحظة تقريبًا. بدون هذا القفل، تعديلين متزامنين ممكن يتلف أحدهما الثاني
+# (lost update) رغم أن الحفظ النهائي نفسه atomic (.tmp + os.replace).
+_lock = threading.Lock()
 
 _USAGE_FILE = os.path.join(config.DATA_DIR, "usage_limits.json")
 
@@ -85,8 +93,9 @@ def get_daily_limit(uid: int) -> int:
 
 
 def get_count(uid: int) -> int:
-    e = _reset_if_needed(uid)
-    return e.get("count", 0)
+    with _lock:
+        e = _reset_if_needed(uid)
+        return e.get("count", 0)
 
 
 def can_create(uid: int) -> bool:
@@ -97,25 +106,28 @@ def can_create(uid: int) -> bool:
 
 def get_reset_seconds(uid: int) -> float:
     """كم ثانية باقية إلى ما تتصفّر الحصة اليومية."""
-    e = _reset_if_needed(uid)
-    remaining = DAY_SECONDS - (time.time() - e.get("window_start", 0.0))
-    return max(0.0, remaining)
+    with _lock:
+        e = _reset_if_needed(uid)
+        remaining = DAY_SECONDS - (time.time() - e.get("window_start", 0.0))
+        return max(0.0, remaining)
 
 
 def record_usage(uid: int) -> None:
-    e = _reset_if_needed(uid)
-    e["count"] = e.get("count", 0) + 1
-    _save()
+    with _lock:
+        e = _reset_if_needed(uid)
+        e["count"] = e.get("count", 0) + 1
+        _save()
 
 
 def activate_subscription(uid: int, days: int) -> None:
     """يفعّل/يمدّد الاشتراك المدفوع بنجوم تليكرام لعدد أيام معيّن."""
-    e = _entry(uid)
-    now = time.time()
-    current_until = e.get("premium_until", 0.0)
-    base = current_until if current_until > now else now
-    e["premium_until"] = base + days * DAY_SECONDS
-    _save()
+    with _lock:
+        e = _entry(uid)
+        now = time.time()
+        current_until = e.get("premium_until", 0.0)
+        base = current_until if current_until > now else now
+        e["premium_until"] = base + days * DAY_SECONDS
+        _save()
 
 
 def get_subscription_remaining_seconds(uid: int) -> float:
@@ -134,18 +146,20 @@ def is_whitelisted(uid: int) -> bool:
 
 
 def add_whitelist(uid: int, note: str = "") -> None:
-    wl = _whitelist_dict()
-    wl[str(uid)] = {"added_at": time.time(), "note": note}
-    _save()
+    with _lock:
+        wl = _whitelist_dict()
+        wl[str(uid)] = {"added_at": time.time(), "note": note}
+        _save()
 
 
 def remove_whitelist(uid: int) -> bool:
-    wl = _whitelist_dict()
-    existed = str(uid) in wl
-    wl.pop(str(uid), None)
-    if existed:
-        _save()
-    return existed
+    with _lock:
+        wl = _whitelist_dict()
+        existed = str(uid) in wl
+        wl.pop(str(uid), None)
+        if existed:
+            _save()
+        return existed
 
 
 def list_whitelist() -> list[int]:
@@ -172,14 +186,15 @@ def is_premium_color(color: str) -> bool:
 
 def toggle_premium_color(color: str) -> bool:
     """يبدّل حالة اللون بين مجاني/مدفوع. يرجّع الحالة الجديدة (True = صار مدفوع)."""
-    pc = _premium_colors_dict()
-    if color in pc:
-        pc.pop(color, None)
+    with _lock:
+        pc = _premium_colors_dict()
+        if color in pc:
+            pc.pop(color, None)
+            _save()
+            return False
+        pc[color] = {"added_at": time.time()}
         _save()
-        return False
-    pc[color] = {"added_at": time.time()}
-    _save()
-    return True
+        return True
 
 
 def list_premium_colors() -> list[str]:

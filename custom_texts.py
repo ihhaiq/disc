@@ -10,12 +10,18 @@
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any
 
 import config
 
 logger = logging.getLogger(__name__)
+
+# يحمي _custom_data + الحفظ للملف من تداخل تعديلين متزامنين (مثلاً المطور
+# يعدّل نص عربي بنفس اللحظة اللي load_custom_texts_into_memory شغالة، أو
+# عدة workers تقرأ/تكتب بالتوازي).
+_lock = threading.Lock()
 
 CUSTOM_TEXTS_FILE = os.path.join(config.DATA_DIR, "custom_texts.json")
 
@@ -41,7 +47,7 @@ def _load() -> None:
             with open(CUSTOM_TEXTS_FILE, "r", encoding="utf-8") as f:
                 _custom_data = json.load(f)
                 logger.info(f"✅ تم تحميل {len(_custom_data)} نص مخصص")
-        except Exception as e:
+        except Exception:
             logger.exception("❌ فشل تحميل ملف النصوص المخصصة")
             _custom_data = {}
     else:
@@ -108,17 +114,20 @@ def set_custom(
     else:
         # عند تحويل الرسالة من Rich إلى نص عادي لا نبقي المحتوى القديم.
         entry.pop("rich", None)
-    _custom_data[var_name] = entry
-    _save()
+    with _lock:
+        _custom_data[var_name] = entry
+        _save()
     logger.info(f"✅ تم حفظ نص مخصص: {var_name}")
 
 
 def delete_custom(var_name: str) -> bool:
     """احذف نص مخصص (أعده للافتراضي)."""
-    existed = var_name in _custom_data
-    _custom_data.pop(var_name, None)
+    with _lock:
+        existed = var_name in _custom_data
+        _custom_data.pop(var_name, None)
+        if existed:
+            _save()
     if existed:
-        _save()
         logger.info(f"🗑️ تم حذف النص المخصص: {var_name}")
     return existed
 
@@ -130,8 +139,9 @@ def list_custom() -> dict[str, Any]:
 
 def reset_all() -> None:
     """احذف كل النصوص المخصصة (أعدها للافتراضي)."""
-    _custom_data.clear()
-    _save()
+    with _lock:
+        _custom_data.clear()
+        _save()
     logger.info("🔄 تم حذف كل النصوص المخصصة")
 
 

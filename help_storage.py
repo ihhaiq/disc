@@ -2,11 +2,14 @@
 import json
 import logging
 import os
+import threading
 import time
 
 import config
 
 logger = logging.getLogger(__name__)
+
+_lock = threading.Lock()
 
 _DATA_DIR = getattr(config, "DATA_DIR", config.BASE_DIR)
 HELP_MESSAGE_FILE_PATH = os.path.join(_DATA_DIR, "help_message.json")
@@ -54,9 +57,10 @@ def get_draft(uid: int) -> dict:
 
 
 def save_draft(uid: int, draft: dict) -> None:
-    data = _read_raw()
-    data.setdefault("draft", {})[str(uid)] = draft
-    _write_raw(data)
+    with _lock:
+        data = _read_raw()
+        data.setdefault("draft", {})[str(uid)] = draft
+        _write_raw(data)
 
 
 def get_published() -> dict | None:
@@ -72,13 +76,14 @@ def get_published() -> dict | None:
 
 
 def publish(uid: int, draft: dict, editor_name: str = "") -> None:
-    data = _read_raw()
-    data["published"] = {
-        "html": draft.get("html", _DEFAULT_HTML),
-        "blocks": draft.get("blocks"),
-        "buttons": draft.get("buttons", []),
-        "editor_id": uid,
-        "editor_name": editor_name,
-        "updated_at": time.time(),
-    }
-    _write_raw(data)
+    with _lock:
+        data = _read_raw()
+        data["published"] = {
+            "html": draft.get("html", _DEFAULT_HTML),
+            "blocks": draft.get("blocks"),
+            "buttons": draft.get("buttons", []),
+            "editor_id": uid,
+            "editor_name": editor_name,
+            "updated_at": time.time(),
+        }
+        _write_raw(data)

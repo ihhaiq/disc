@@ -206,7 +206,21 @@ STATUS_UPDATE_INTERVAL_SECONDS = 2.2
 # أقصى وقت مسموح لأي Job واحد (تنزيل + بناء + رندر + رفع). لو تجاوزه (مثلاً
 # بسبب ملف صوتي تالف يعلّق ffmpeg/ffprobe للأبد)، نلغيه ونكمل للي بعده بدل
 # ما يعلّق الـ worker بالكامل ويوقف كل الطابور من ورائه.
-JOB_TIMEOUT_SECONDS = 8 * 60
+JOB_TIMEOUT_SECONDS = 8 * 60  # الحد الافتراضي/الأدنى (يُستخدم كسقف أدنى دائمًا)
+# ملفات كبيرة جدًا (خصوصًا مع USE_LOCAL_BOT_API اللي يرفع الحد لـ 2 جيجا)
+# ممكن يحتاج تنزيلها وحدها وقت أطول من 8 دقائق بشبكة عادية. بدل timeout ثابت
+# يقطع طلبات مشروعة بس كبيرة، نحسبه ديناميكيًا حسب حجم الملف الصوتي الفعلي.
+JOB_TIMEOUT_MAX_SECONDS = 30 * 60
+JOB_TIMEOUT_SECONDS_PER_MB = 3.0  # ثواني إضافية مسموحة لكل ميجابايت من حجم الصوت
+
+
+def compute_job_timeout_seconds(audio_file_size_bytes: int | None) -> float:
+    """يحسب مهلة زمنية معقولة لمعالجة Job واحد بناءً على حجم الملف الصوتي."""
+    if not audio_file_size_bytes or audio_file_size_bytes <= 0:
+        return JOB_TIMEOUT_SECONDS
+    size_mb = audio_file_size_bytes / (1024 * 1024)
+    dynamic = JOB_TIMEOUT_SECONDS + size_mb * JOB_TIMEOUT_SECONDS_PER_MB
+    return min(max(dynamic, JOB_TIMEOUT_SECONDS), JOB_TIMEOUT_MAX_SECONDS)
 
 # ============================================================
 # دعم القنوات (Channels) — إنشاء القرص من منشور صوتي بقناة
@@ -1134,8 +1148,17 @@ def cleanup(*paths: str) -> None:
             logger.warning(texts_module.LOG_DELETE_FAILED_FMT.format(p=p, e=e))
 
 
+DOWNLOAD_BACKOFF_BASE_SECONDS = 1.5
+DOWNLOAD_BACKOFF_MAX_SECONDS = 20.0
+
+
 async def download_with_retries(bot: Bot, file_id: str, destination: str,
                                 timeout_seconds: int, retries: int = 3) -> None:
+    """
+    ينزّل ملف من تليكرام مع إعادة محاولة بـ exponential backoff (بدل انتظار
+    ثابت 2 ثانية) عشان ما نضغط أكثر على شبكة/سيرفر أصلًا متعثّر مؤقتًا، وحتى
+    نمنح فرصة أكبر للتعافي بمشاكل الشبكة المتقطعة قبل فشل الطلب بالكامل.
+    """
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         if os.path.exists(destination):
@@ -1155,7 +1178,8 @@ async def download_with_retries(bot: Bot, file_id: str, destination: str,
                 attempt, retries, type(exc).__name__, exc or texts_module.LOG_NO_DETAIL_MESSAGE,
             )
             if attempt < retries:
-                await asyncio.sleep(2)
+                backoff = min(DOWNLOAD_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)), DOWNLOAD_BACKOFF_MAX_SECONDS)
+                await asyncio.sleep(backoff)
             else:
                 raise
     if last_error is not None:
@@ -1202,6 +1226,92 @@ async def notify_queue_position(bot: Bot, chat_id: int, uid, job_id: str) -> Non
         logger.exception("فشل إرسال رسالة موقع الطابور")
 
 
+# ============================================================
+# تنظيف دوري للحالة المؤقتة بالذاكرة (Periodic State Cleanup)
+# ============================================================
+# القواميس مثل pending_audio/wizard_state/pending_images/pending_confirm/
+# channel_reply_index تُنظّف حاليًا بشكل "كسول" (lazy) فقط لما المستخدم
+# يتفاعل مرة ثانية (عبر _get_pending_audio_or_none). لو مستخدم بدأ تدفّق
+# (أرسل صوت، أو وصل لخطوة بالـ Wizard) وما كمل، يبقى الـ entry الخاص فيه
+# بالذاكرة للأبد — تسريب ذاكرة تراكمي مع الوقت خصوصًا ببوت نشط. هذي المهمة
+# الخلفية تفحص الحالة دوريًا وتحذف أي شيء انتهت صلاحيته فعليًا.
+CLEANUP_INTERVAL_SECONDS = 10 * 60
+cleanup_task: asyncio.Task | None = None
+
+
+def _cleanup_expired_pending_audio() -> int:
+    now = time.time()
+    removed = 0
+    for key in list(pending_audio.keys()):
+        entry = pending_audio.get(key)
+        if entry is None or now > entry.get("expires_at", 0):
+            pending_audio.pop(key, None)
+            wizard_state.pop(key, None)
+            if isinstance(key, int):
+                pending_images.pop(key, None)
+            removed += 1
+    return removed
+
+
+def _cleanup_orphaned_wizard_state() -> int:
+    """أي wizard_state ما له entry مقابل بـ pending_audio يُعتبر يتيمًا (orphan)."""
+    removed = 0
+    for key in list(wizard_state.keys()):
+        if key not in pending_audio:
+            wizard_state.pop(key, None)
+            removed += 1
+    return removed
+
+
+def _cleanup_expired_pending_confirm() -> int:
+    now = time.time()
+    removed = 0
+    for uid, job in list(pending_confirm.items()):
+        if now > job.get("confirm_expires_at", 0):
+            pending_confirm.pop(uid, None)
+            removed += 1
+    return removed
+
+
+def _cleanup_orphaned_channel_reply_index() -> int:
+    """أي مفتاح بـ channel_reply_index يشاور على سياق قناة/مجموعة ما موجود
+    فعليًا بـ pending_audio (يعني خلص أو انتهت صلاحيته) يصير غير مفيد."""
+    removed = 0
+    for reply_key, mapped_key in list(channel_reply_index.items()):
+        if mapped_key not in pending_audio:
+            channel_reply_index.pop(reply_key, None)
+            removed += 1
+    return removed
+
+
+async def _periodic_cleanup_loop() -> None:
+    while True:
+        try:
+            await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+            n1 = _cleanup_expired_pending_audio()
+            n2 = _cleanup_orphaned_wizard_state()
+            n3 = _cleanup_expired_pending_confirm()
+            n4 = _cleanup_orphaned_channel_reply_index()
+            total = n1 + n2 + n3 + n4
+            if total:
+                logger.info(
+                    "🧹 تنظيف دوري للحالة المؤقتة: pending_audio=%s wizard_state=%s "
+                    "pending_confirm=%s channel_reply_index=%s (مجموع=%s)",
+                    n1, n2, n3, n4, total,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("فشل التنظيف الدوري للحالة المؤقتة")
+
+
+def start_cleanup_task() -> None:
+    """يشغّل مهمة التنظيف الدوري مرة واحدة فقط (idempotent)."""
+    global cleanup_task
+    if cleanup_task is None or cleanup_task.done():
+        cleanup_task = asyncio.create_task(_periodic_cleanup_loop())
+
+
 async def start_job_worker(bot: Bot) -> None:
     """
     يشغّل عدة workers بالتوازي (بعدد config.MAX_CONCURRENT_JOBS) بدل واحد
@@ -1214,20 +1324,51 @@ async def start_job_worker(bot: Bot) -> None:
         worker_tasks.append(asyncio.create_task(_job_worker_loop(bot)))
 
 
+async def _get_next_job() -> tuple[dict, asyncio.Queue]:
+    """
+    يرجّع أول Job جاهز مع الطابور اللي جاء منه (بأولوية دائمة لطابور المطور).
+    ينتظر بشكل حدثي (event-driven عبر asyncio.wait) بدل الـ polling المتكرر
+    (busy-wait بـ asyncio.sleep(0.1)) لما تكون كل الطوابير فاضية — هذا يلغي
+    استهلاك دورة CPU كل 100ms طوال فترات الخمول الطويلة بين الطلبات.
+    """
+    while True:
+        if not developer_job_queue.empty():
+            return developer_job_queue.get_nowait(), developer_job_queue
+        if not job_queue.empty():
+            return job_queue.get_nowait(), job_queue
+
+        dev_task = asyncio.create_task(developer_job_queue.get())
+        normal_task = asyncio.create_task(job_queue.get())
+        try:
+            done, pending = await asyncio.wait(
+                {dev_task, normal_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            for t in pending:
+                t.cancel()
+            for t in pending:
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        if dev_task in done and not dev_task.cancelled():
+            job = dev_task.result()
+            # حالة دفاعية نادرة: لو استلم طابور المطور عنصر بنفس لحظة استلام
+            # الطابور العادي لعنصره (كلاهما "done")، نعيد عنصر الطابور العادي
+            # فورًا حتى لا يضيع من الذاكرة بدون معالجة.
+            if normal_task in done and not normal_task.cancelled():
+                job_queue.put_nowait(normal_task.result())
+            return job, developer_job_queue
+
+        if normal_task in done and not normal_task.cancelled():
+            return normal_task.result(), job_queue
+        # لو الاثنين انلغوا لسبب غير متوقع، نعيد المحاولة من جديد بأمان.
+
+
 async def _job_worker_loop(bot: Bot) -> None:
     while True:
-        queue = None
-        try:
-            job = developer_job_queue.get_nowait()
-            queue = developer_job_queue
-        except asyncio.QueueEmpty:
-            try:
-                job = job_queue.get_nowait()
-                queue = job_queue
-            except asyncio.QueueEmpty:
-                await asyncio.sleep(0.1)
-                continue
-
+        job, queue = await _get_next_job()
         job_id = job.get("job_id")
         # الطلب بدأ يُعالَج فعليًا الآن ← يطلع من طابور العرض المرئي
         if job_id in queue_order:
@@ -1241,8 +1382,9 @@ async def _job_worker_loop(bot: Bot) -> None:
                 continue
 
             tracked_jobs[job_id] = job
+            job_timeout = compute_job_timeout_seconds(getattr(job.get("audio"), "file_size", None))
             try:
-                await asyncio.wait_for(process_job(bot, job), timeout=JOB_TIMEOUT_SECONDS)
+                await asyncio.wait_for(process_job(bot, job), timeout=job_timeout)
             except asyncio.TimeoutError:
                 # process_job نفسها تكون قد أرسلت رسالة توضيحية للمستخدم
                 # ونظّفت ملفاتها المؤقتة (عبر معالجة CancelledError بداخلها
@@ -1375,6 +1517,12 @@ VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
     ("kiss", "BTN_VINYL_KISS"),
     ("ali", "BTN_VINYL_ALI"),
 ]
+
+# مصدر وحيد للقيم المقبولة عند اختيار اللون (بدل تكرار نفس القائمة يدويًا
+# بمكانين منفصلين — on_vinyl_choice و on_wiz_color — وهو بالضبط سبب الخطأ
+# الشائع الموثّق بـ خطوات_اضافة_لون_جديد.md: نسيان تحديث أحد المكانين عند
+# إضافة لون جديد فيشتغل بمسار ويفشل بالآخر بصمت).
+VALID_VINYL_COLOR_VALUES: frozenset[str] = frozenset(value for value, _ in VINYL_COLOR_CHOICES)
 
 
 def user_has_premium_access(user_id: int) -> bool:
@@ -1563,12 +1711,13 @@ async def process_job(bot: Bot, job: dict) -> None:
         # لكن نبي كمان نبلّغ المستخدم برسالة واضحة بدل ما تختفي المهمة بصمت.
         logger.warning(texts_module.LOG_JOB_TIMEOUT)
         try:
+            actual_timeout_minutes = compute_job_timeout_seconds(getattr(audio, "file_size", None)) / 60
             if _is_group_context(context_key):
-                animator.set_stage(texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=JOB_TIMEOUT_SECONDS / 60))
+                animator.set_stage(texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=actual_timeout_minutes))
             else:
                 await reply_with_premium_emoji(
                     message,
-                    texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=JOB_TIMEOUT_SECONDS / 60),
+                    texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=actual_timeout_minutes),
                 )
         except Exception:
             logger.exception(texts_module.LOG_SEND_ERROR_FAILED)
@@ -3007,7 +3156,7 @@ async def on_wiz_color(callback, bot: Bot):
         return
     choice = base.split(":", 1)[1]
     presser_id = callback.from_user.id if callback.from_user else 0
-    if choice in ("green", "pink", "blue", "yellow", "red", "bloody", "rose", "emerald", "koi", "kiss", "default","ali"):
+    if choice in VALID_VINYL_COLOR_VALUES:
         if limits.is_premium_color(choice) and not user_has_premium_access(presser_id):
             # 🔒 لون مقفل: بالإضافة لتنبيه الـ callback السريع، نرسل رسالة كاملة
             # فيها زر اشتراك، لكل من العربي والإنكليزي حسب لغة الضاغط (tr()
@@ -3148,6 +3297,7 @@ async def _finish_wizard(bot: Bot, uid, send_func, segment_start: float) -> None
 
     # محادثة خاصة عادية: بدل الإطلاق الفوري، نعرض شاشة مراجعة تتيح للمستخدم
     # طلب معاينة سريعة (٣ ثواني بجودة منخفضة) قبل ما يقرر إنشاء الفيديو الكامل.
+    job["confirm_expires_at"] = time.time() + WIZARD_TTL_SECONDS
     pending_confirm[owner_id] = job
     await send_func(
         tr("MSG_WIZ_REVIEW", owner_id),
@@ -3422,7 +3572,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
 async def on_vinyl_choice(callback, bot: Bot):
     choice = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id if callback.from_user else 0
-    if choice in ("pink", "blue", "yellow", "red", "green", "bloody", "rose", "emerald", "koi", "kiss", "default","ali"):
+    if choice in VALID_VINYL_COLOR_VALUES:
         if limits.is_premium_color(choice) and not user_has_premium_access(user_id):
             # 🔒 لون مقفل: تنبيه سريع + رسالة كاملة فيها زر الاشتراك.
             # tr() تختار النص العربي أو الإنكليزي تلقائيًا حسب لغة المستخدم
@@ -3456,7 +3606,10 @@ async def on_speed_selected(callback, bot: Bot):
 
 
 @router.message((F.video | F.voice | F.document), F.chat.type == "private")
-async def on_wrong_type(message: Message):
+async def on_wrong_type(message: Message, bot: Bot):
+    # ⚠️ إصلاح: كانت الدالة لا تستقبل "bot" كمعامل رغم استخدامه بالداخل، وهذا
+    # كان يسبب NameError (انهيار الـ handler كاملًا) لأي محاولة إرسال فيديو/
+    # صوتية عادية/مستند بالخاص. aiogram يحقن "bot" تلقائيًا لو أُعلن كمعامل.
     uid = message.from_user.id if message.from_user else 0
     await reply_text_variable(message, bot, "MSG_WRONG_TYPE", uid)
 
