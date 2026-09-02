@@ -2,91 +2,67 @@ import re
 from html.parser import HTMLParser
 
 
-# ============================================================
-# دوال تحويل النصوص والـ HTML
-# ============================================================
-
 class HTMLToTelegramParser(HTMLParser):
-    """محوّل HTML إلى صيغة Telegram المدعومة (<b>, <i>, <code>, إلخ)"""
-    
+    """Keep the subset of HTML supported by Telegram messages."""
+
+    SUPPORTED_TAGS = frozenset(
+        {"b", "strong", "i", "em", "code", "pre", "u", "s", "a", "tg-emoji"}
+    )
+
     def __init__(self):
         super().__init__()
         self.text = ""
-        self.open_tags = []
-    
+        self.open_tags: list[str] = []
+
     def handle_starttag(self, tag, attrs):
-        # فقط الـ tags المدعومة (+ tg-emoji للإيموجي البريميوم، مدعومة أصلاً بـ Telegram HTML)
-        if tag in ('b', 'strong', 'i', 'em', 'code', 'pre', 'u', 's', 'a', 'tg-emoji'):
+        if tag in self.SUPPORTED_TAGS:
             self.open_tags.append(tag)
-            if tag in ('b', 'strong'):
-                self.text += '<b>'
-            elif tag in ('i', 'em'):
-                self.text += '<i>'
-            elif tag == 'code':
-                self.text += '<code>'
-            elif tag == 'pre':
-                self.text += '<pre>'
-            elif tag == 'u':
-                self.text += '<u>'
-            elif tag == 's':
-                self.text += '<s>'
-            elif tag == 'a':
-                href = dict(attrs).get('href', '#')
+            if tag in ("b", "strong"):
+                self.text += "<b>"
+            elif tag in ("i", "em"):
+                self.text += "<i>"
+            elif tag in ("code", "pre", "u", "s"):
+                self.text += f"<{tag}>"
+            elif tag == "a":
+                href = dict(attrs).get("href", "#")
                 self.text += f'<a href="{href}">'
-            elif tag == 'tg-emoji':
-                # نحافظ على emoji-id كما هو (أرقام فقط لحماية إضافية) حتى لا يضيع
-                # ونقدر لاحقًا نبني منه custom_emoji entity صحيح
-                emoji_id = dict(attrs).get('emoji-id', '')
-                emoji_id = emoji_id if emoji_id.isdigit() else ''
+            elif tag == "tg-emoji":
+                emoji_id = dict(attrs).get("emoji-id") or ""
+                emoji_id = emoji_id if emoji_id.isdigit() else ""
                 self.text += f'<tg-emoji emoji-id="{emoji_id}">'
-    
+
     def handle_endtag(self, tag):
-        if tag in ('b', 'strong', 'i', 'em', 'code', 'pre', 'u', 's', 'a', 'tg-emoji'):
-            if self.open_tags and self.open_tags[-1] in (tag, 'strong' if tag == 'b' else tag, 'em' if tag == 'i' else tag):
+        if tag in self.SUPPORTED_TAGS:
+            equivalent_tags = (
+                tag,
+                "strong" if tag == "b" else tag,
+                "em" if tag == "i" else tag,
+            )
+            if self.open_tags and self.open_tags[-1] in equivalent_tags:
                 self.open_tags.pop()
-            if tag in ('b', 'strong'):
-                self.text += '</b>'
-            elif tag in ('i', 'em'):
-                self.text += '</i>'
-            elif tag == 'code':
-                self.text += '</code>'
-            elif tag == 'pre':
-                self.text += '</pre>'
-            elif tag == 'u':
-                self.text += '</u>'
-            elif tag == 's':
-                self.text += '</s>'
-            elif tag == 'a':
-                self.text += '</a>'
-            elif tag == 'tg-emoji':
-                self.text += '</tg-emoji>'
-    
+            if tag in ("b", "strong"):
+                self.text += "</b>"
+            elif tag in ("i", "em"):
+                self.text += "</i>"
+            elif tag in ("code", "pre", "u", "s", "a", "tg-emoji"):
+                self.text += f"</{tag}>"
+
     def handle_data(self, data):
         self.text += data
 
 
 def clean_html(html_text: str) -> str:
-    """تحويل HTML الخام إلى Telegram HTML صحيح (شيل tags غير مدعومة)"""
-    # شيل أي tags غير مدعومة
-    html_text = re.sub(r'</?h[1-6][^>]*>', '', html_text)  # شيل h1-h6
-    html_text = re.sub(r'</?p[^>]*>', '', html_text)  # شيل p
-    html_text = re.sub(r'</?div[^>]*>', '', html_text)  # شيل div
-    html_text = re.sub(r'</?footer[^>]*>', '', html_text)  # شيل footer
-    html_text = re.sub(r'</?span[^>]*>', '', html_text)  # شيل span
-    html_text = re.sub(r'</?section[^>]*>', '', html_text)  # شيل section
-    html_text = re.sub(r'</?article[^>]*>', '', html_text)  # شيل article
-    html_text = re.sub(r'</?main[^>]*>', '', html_text)  # شيل main
-    
-    # حوّل الفواصل الفارغة إلى newlines
-    html_text = re.sub(r'\n\s*\n+', '\n\n', html_text)  # دمج newlines متكررة
-    
+    """Normalize HTML to the subset accepted by Telegram."""
+    for tag in (r"h[1-6]", "p", "div", "footer", "span", "section", "article", "main"):
+        html_text = re.sub(rf"</?{tag}[^>]*>", "", html_text)
+    html_text = re.sub(r"\n\s*\n+", "\n\n", html_text)
+
     parser = HTMLToTelegramParser()
     try:
         parser.feed(html_text)
         return parser.text.strip()
-    except:
-        # لو فشل التحليل، أرجع النص مع شيل tags فقط
-        return re.sub(r'<[^>]+>', '', html_text).strip()
+    except Exception:
+        return re.sub(r"<[^>]+>", "", html_text).strip()
 
 
 # ============================================================
@@ -374,14 +350,14 @@ TEXTS_EN: dict[str, str] = {
     "BTN_VINYL_BLACK": " ",
     "BTN_VINYL_GREEN": "Green (beta)",
     "BTN_VINYL_BLOODY": "🩸",
-    "BTN_VINYL_ROSE" : "💮 ROSE",
+    "BTN_VINYL_ROSE": "💮 ROSE",
     "BTN_VINYL_KOI": "  ",
     "BTN_VINYL_KISS": "KISS",
     "BTN_VINYL_ALI": "ALI",
     "BTN_BACK": "🔙 Back",
     "SPEED_LABEL_FULL": "Full turn",
     "SPEED_LABEL_8RPM": "8 RPM",
-    "SPEED_LABEL_19RPM" : "19 RPM",
+    "SPEED_LABEL_19RPM": "19 RPM",
     "SPEED_LABEL_33RPM": "33 RPM",
     "SPEED_LABEL_45RPM": "45 RPM",
     "MSG_VINYL_COLOR_INFO": (

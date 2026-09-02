@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 
-_DATA_DIR = getattr(config, "DATA_DIR", config.BASE_DIR)
-HELP_MESSAGE_FILE_PATH = os.path.join(_DATA_DIR, "help_message.json")
-
+HELP_MESSAGE_FILE_PATH = os.path.join(config.DATA_DIR, "help_message.json")
 _DEFAULT_HTML = "النص"
 
 
@@ -23,7 +21,7 @@ def _read_raw() -> dict:
     try:
         with open(HELP_MESSAGE_FILE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except (OSError, ValueError, TypeError):
         logger.exception("فشل قراءة help_message.json")
         return {}
 
@@ -35,25 +33,22 @@ def _write_raw(data: dict) -> None:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         os.replace(tmp_path, HELP_MESSAGE_FILE_PATH)
-    except Exception:
+    except (OSError, TypeError):
         logger.exception("فشل حفظ ملف help_message.json")
 
 
+def _normalize_draft(draft: dict | None) -> dict:
+    normalized = draft or {}
+    normalized.setdefault("html", _DEFAULT_HTML)
+    normalized.setdefault("blocks", None)
+    normalized.setdefault("buttons", [])
+    return normalized
+
+
 def get_draft(uid: int) -> dict:
-    """
-    مسودة المطور الحالية (قبل الحفظ/النشر النهائي).
-    شكلها: {"html": str | None, "blocks": list | None, "buttons": [{"text": str, "url": str}]}
-    - لو "blocks" موجودة (غير None) ← هذا المصدر الأساسي، ويُرسَل كما هو.
-    - لو "blocks" فاضية ← نستخدم "html" كبديل.
-    """
+    """Return the developer's current `/help` draft."""
     data = _read_raw()
-    draft = data.get("draft", {}).get(str(uid))
-    if draft is None:
-        draft = {"html": _DEFAULT_HTML, "blocks": None, "buttons": []}
-    draft.setdefault("blocks", None)
-    draft.setdefault("html", _DEFAULT_HTML)
-    draft.setdefault("buttons", [])
-    return draft
+    return _normalize_draft(data.get("draft", {}).get(str(uid)))
 
 
 def save_draft(uid: int, draft: dict) -> None:
@@ -64,15 +59,10 @@ def save_draft(uid: int, draft: dict) -> None:
 
 
 def get_published() -> dict | None:
-    """
-    النسخة المنشورة فعليًا اللي يشوفها المستخدمين عند إرسال /help.
-    None لو المطور ما نشر شي بعد (نرجع للنص الافتراضي القديم MSG_START_HELP).
-    """
+    """Return the published `/help` message, if one exists."""
     data = _read_raw()
     published = data.get("published")
-    if published is not None:
-        published.setdefault("blocks", None)
-    return published
+    return _normalize_draft(published) if published is not None else None
 
 
 def publish(uid: int, draft: dict, editor_name: str = "") -> None:
