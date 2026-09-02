@@ -89,30 +89,6 @@ def clean_html(html_text: str) -> str:
         return re.sub(r'<[^>]+>', '', html_text).strip()
 
 
-def text_to_bold(text: str) -> str:
-    """حوّل نص عادي إلى عريض"""
-    return f"<b>{text}</b>"
-
-
-def text_to_italic(text: str) -> str:
-    """حوّل نص عادي إلى مائل"""
-    return f"<i>{text}</i>"
-
-
-def text_to_code(text: str) -> str:
-    """حوّل نص عادي إلى كود"""
-    return f"<code>{text}</code>"
-
-
-def text_to_underline(text: str) -> str:
-    """حوّل نص عادي إلى مسطر"""
-    return f"<u>{text}</u>"
-
-
-def text_to_strikethrough(text: str) -> str:
-    """حوّل نص عادي إلى مشطوب"""
-    return f"<s>{text}</s>"
-
 # ============================================================
 # config.py
 # ============================================================
@@ -205,16 +181,6 @@ MSG_START_HELP = (
     "<i>هذا لا يغيّر سرعة الصوت أو الملف</i>"
 )
 
-MSG_TEMPLATE_FILES_MISSING = (
-    "⚠️ ملفات القالب (vinyl.png / shadow.png) غير موجودة في مجلد assets/. "
-    "ضعها ثم أعد المحاولة."
-)
-
-MSG_NO_THUMBNAIL_PROMPT = (
-    "⚠️ هذا الملف الصوتي لا يحتوي صورة مصغرة (thumbnail). "
-    "يمكنك الضغط على الزر أدناه لإضافة صورة ثم سأستخدمها مع الملف الصوتي."
-)
-
 MSG_JOB_QUEUED = (
     "🧵 تم إضافة الملف إلى الطابور، وسيتم معالجته بمجرد انتهاء الملفات السابقة. "
     "سيتم استعمال أول دقيقة فقط من الملف."
@@ -246,7 +212,6 @@ MSG_IMAGE_RECEIVED = (
 )
 
 MSG_DEV_ONLY_OPTION = "هذا الخيار للمطور فقط"
-MSG_VINYL_CHOICE_SAVED_EDIT = "🎨 تم حفظ اختيار قالب القرص للمطور فقط"
 MSG_VINYL_CHOICE_SAVED_ANSWER = "✅ تم حفظ الاختيار"
 MSG_SPEED_SAVED_ANSWER = "✅ تم حفظ سرعة القرص لهذا المستخدم"
 

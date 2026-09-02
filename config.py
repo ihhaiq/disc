@@ -21,10 +21,6 @@ MAX_DURATION_SECONDS = float(os.environ.get("MAX_DURATION_SECONDS", 60))  # حد
 # --- Local Bot API Server (telegram-bot-api) ---
 # لو محدد، البوت يتصل بسيرفر تليكرام محلي بدل api.telegram.org
 # عشان يرفع حد تنزيل/رفع الملفات من 20 ميجا إلى 2 جيجا.
-# API_ID / API_HASH يُستخدمان من طرف حاوية telegram-bot-api نفسها (سيرفس منفصل على Railway)،
-# مو من كود بايثون هذا مباشرة - لكن نتحقق من وجودهم هنا فقط للتأكد أن الإعداد مكتمل.
-API_ID = os.environ.get("API_ID", "")
-API_HASH = os.environ.get("API_HASH", "")
 LOCAL_BOT_API_URL = os.environ.get("LOCAL_BOT_API_URL", "").rstrip("/")
 USE_LOCAL_BOT_API = bool(LOCAL_BOT_API_URL)
 
@@ -58,9 +54,7 @@ VINYL_ROSE_PATH = os.path.join(ASSETS_DIR, "vinyl_rose.png")
 SHADOW_ROSE_PATH = os.path.join(ASSETS_DIR, "shadow_rose.png")
 VINYL_EMERALD_PATH = os.path.join(ASSETS_DIR, "vinyl_emerald.png")
 VINYL_KOI_PATH = os.path.join(ASSETS_DIR, "vinyl_koi.png")
-SHADOW_KOI_PATH = os.path.join(ASSETS_DIR, "shadow_koi.png")
 VINYL_KISS_PATH = os.path.join(ASSETS_DIR, "vinyl_kiss.png")
-SHADOW_KISS_PATH = os.path.join(ASSETS_DIR, "shadow_kiss.png")
 VINYL_ALI_PATH = os.path.join(ASSETS_DIR, "vinyl_ali.png")
 
 TEMP_DIR = os.path.join(BASE_DIR, "temp")

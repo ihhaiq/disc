@@ -19,13 +19,10 @@ python main.py
 
 ## ملفات القالب (assets/)
 
-- `vinyl.png` — قرص أسود بتدرّج + أخاديد + انعكاسات ضوئية (640×640).
-- `pin.png` — الحديدة المعدنية الوسطى (بشفافية) مع ظلها، توضع فوق الصورة تلقائياً.
-- `shadow.png` — طبقة ظل/إضاءة عامة فوق كل شيء (ثابتة، لا تدور).
+- `vinyl*.png` — قوالب الأقراص المتاحة بألوانها وتصاميمها المختلفة.
+- `shadow*.png` — طبقات الظل والإضاءة الثابتة التي توضع فوق القرص.
 
-**هذي مجرد نماذج بسيطة تولّدت آلياً للاختبار السريع.**
-استبدلها بتصميمك الحقيقي (بنفس الاسم والمقاس 640×640، PNG بشفافية) للحصول على
-الشكل النهائي المطلوب.
+القوالب صور PNG مربعة، ويُفضّل إبقاؤها بالمقاس نفسه مع شفافية صحيحة حول القرص.
 
 ## إعدادات قابلة للتعديل (متغيرات بيئة)
 
@@ -49,12 +46,14 @@ python main.py
 ```
 vinylbot/
 ├── main.py         # نقطة التشغيل + polling
-├── handlers.py      # استقبال الصوت + التحقق + إدارة الطابور
+├── handlers.py      # مسارات البوت وإدارة الطلبات والطابور
 ├── compose.py       # لصق صورة الغلاف داخل ثقب القرص (Pillow)
 ├── processor.py     # تدوير القرص + دمج الصوت (ffmpeg)
-├── config.py         # الإعدادات
-├── assets/           # vinyl.png + shadow.png (القالب)
-├── temp/             # ملفات مؤقتة (تُحذف تلقائياً بعد كل طلب)
+├── limits.py        # حدود الاستخدام والاشتراكات
+├── texts.py         # النصوص والترجمة
+├── config.py        # الإعدادات
+├── assets/          # قوالب الأقراص والظلال
+├── temp/            # ملفات مؤقتة (تُحذف تلقائياً بعد كل طلب)
 └── requirements.txt
 ```
 # en
@@ -77,13 +76,11 @@ python main.py
 
 ## Template Files (assets/)
 
-- `vinyl.png` — Black disc with gradient + grooves + light reflections (640x640).
+- `vinyl*.png` — Available vinyl templates in their different colors and designs.
 
-- `pin.png` — The central metal piece (transparent) with its shadow, automatically placed on top of the image.
+- `shadow*.png` — Static shadow and lighting layers placed over the disc.
 
-- `shadow.png` — A general shadow/light layer over everything (static, does not rotate).
-
-**These are just simple, automatically generated samples for quick testing.** Replace them with your actual design (same name and size 640x640, PNG with transparency) to get the desired final look.
+Templates should remain square PNG images with correct transparency around the disc.
 
 ## Adjustable Settings (Environment Variables)
 
@@ -108,11 +105,13 @@ python main.py
 ```
 vinylbot/
 ├── main.py # Startup point + polling
-├── handlers.py # Audio reception + verification + queue management
+├── handlers.py # Bot routes, requests, and queue management
 ├── compose.py # Paste cover image into disk hole (Pillow)
 ├── processor.py # Disk rotation + audio merging (ffmpeg)
+├── limits.py # Usage limits and subscriptions
+├── texts.py # Text and translations
 ├── config.py # Settings
-├── assets/ # vinyl.png + shadow.png (Template)
+├── assets/ # Vinyl and shadow templates
 ├── temp/ # Temporary files (automatically deleted after each request)
 └── requirements.txt
 ```

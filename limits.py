@@ -130,11 +130,6 @@ def activate_subscription(uid: int, days: int) -> None:
         _save()
 
 
-def get_subscription_remaining_seconds(uid: int) -> float:
-    e = _entry(uid)
-    return max(0.0, e.get("premium_until", 0.0) - time.time())
-
-
 # --- القائمة البيضاء ---
 
 def _whitelist_dict() -> dict:
@@ -195,7 +190,3 @@ def toggle_premium_color(color: str) -> bool:
         pc[color] = {"added_at": time.time()}
         _save()
         return True
-
-
-def list_premium_colors() -> list[str]:
-    return list(_premium_colors_dict().keys())

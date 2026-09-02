@@ -69,17 +69,6 @@ def _save() -> None:
 _load()
 
 
-def get_custom(var_name: str, default: str | None = None) -> str | None:
-    """
-    احصل على قيمة النص المخصصة (النسخة النصية الاحتياطية).
-    المحتوى الغني، إن وجد، محفوظ بشكل منفصل داخل entry["rich"].
-    """
-    entry = _custom_data.get(var_name)
-    if entry:
-        return entry.get("value", default)
-    return default
-
-
 def get_custom_rich(var_name: str) -> dict | None:
     """أرجع محتوى Rich Message المحفوظ للمتغير، أو None للنص العادي."""
     entry = _custom_data.get(var_name)
@@ -120,49 +109,6 @@ def set_custom(
     logger.info(f"✅ تم حفظ نص مخصص: {var_name}")
 
 
-def delete_custom(var_name: str) -> bool:
-    """احذف نص مخصص (أعده للافتراضي)."""
-    with _lock:
-        existed = var_name in _custom_data
-        _custom_data.pop(var_name, None)
-        if existed:
-            _save()
-    if existed:
-        logger.info(f"🗑️ تم حذف النص المخصص: {var_name}")
-    return existed
-
-
 def list_custom() -> dict[str, Any]:
     """أرجع قائمة كل النصوص المخصصة."""
     return dict(_custom_data)
-
-
-def reset_all() -> None:
-    """احذف كل النصوص المخصصة (أعدها للافتراضي)."""
-    with _lock:
-        _custom_data.clear()
-        _save()
-    logger.info("🔄 تم حذف كل النصوص المخصصة")
-
-
-def get_custom_or_default(var_name: str, texts_module_ref) -> str:
-    """
-    احصل على النص — أولاً من custom_texts.json، لو ما موجود من texts.py
-    
-    الاستخدام:
-        from custom_texts import get_custom_or_default
-        from texts import MSG_WELCOME  # الافتراضي
-        
-        text = get_custom_or_default("MSG_WELCOME", texts_module)
-    """
-    # جرّب من المخصصة أولاً
-    custom_value = get_custom(var_name)
-    if custom_value is not None:
-        return custom_value
-    
-    # لو ما موجودة، استرجع من texts.py
-    try:
-        return getattr(texts_module_ref, var_name, "")
-    except AttributeError:
-        logger.warning(f"⚠️ المتغيّر {var_name} غير موجود بـ texts.py")
-        return ""
