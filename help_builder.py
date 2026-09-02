@@ -32,14 +32,6 @@ def _root_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎛 تخصيص", callback_data="help_builder:menu")],
     ])
-def _model_to_data(obj):
-    """يحوّل كائنات pydantic (اللي aiogram يبنيها منها) إلى dict/list عادي."""
-    if hasattr(obj, "model_dump"):
-        try:
-            return obj.model_dump(exclude_none=True)
-        except Exception:
-            pass
-    return obj
 # أنواع الوسائط اللي عند إعادة إرسالها كـ blocks تحتاج تحويل من صيغة الإخراج
 # (Output: file_id/file_unique_id/width/height/...) إلى صيغة الإدخال
 # (Input: حقل واحد اسمه "media" يحمل الـ file_id). لو ما حوّلناها، pydantic

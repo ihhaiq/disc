@@ -1,5 +1,4 @@
 import asyncio
-import ast
 import html
 import logging
 import os
@@ -13,7 +12,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import (
     Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
     LabeledPrice, PreCheckoutQuery, MessageEntity,
-    InputRichMessage, ReplyParameters, InputMediaPhoto,
+    InputRichMessage, ReplyParameters,
 )
 
 from compose import build_disc
@@ -21,10 +20,9 @@ from processor import get_duration, render_vinyl, render_preview
 import config
 import limits
 import texts as texts_module
-from texts import clean_html, text_to_bold, text_to_italic, text_to_code, text_to_underline, text_to_strikethrough
+from texts import clean_html
 import custom_texts
 import math
-from texts import BTN_VINYL_BLOODY , BTN_VINYL_ROSE , BTN_VINYL_EMERALD
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -196,12 +194,9 @@ awaiting_whitelist_add: set[int] = set()
 
 # --- محرر النصوص (لوحة المطور) ---
 TEXTS_PER_PAGE = 5
-TEXTS_FILE_PATH = os.path.join(config.BASE_DIR, "texts.py")
 dev_text_edit_page: dict[int, int] = {}
 awaiting_text_value: dict[int, dict] = {}  # {"var_name": str, "lang": "ar"|"en"}
 
-HOURGLASS_FRAMES = ["⏳", "⌛"]
-PROGRESS_BAR_WIDTH = 12
 STATUS_UPDATE_INTERVAL_SECONDS = 2.2
 # أقصى وقت مسموح لأي Job واحد (تنزيل + بناء + رندر + رفع). لو تجاوزه (مثلاً
 # بسبب ملف صوتي تالف يعلّق ffmpeg/ffprobe للأبد)، نلغيه ونكمل للي بعده بدل
@@ -384,9 +379,6 @@ PREVIEW_EMOJI_ID = "5904219717073114606"
 PREMIUM_EMOJI_IDS = {
     "emerald": "5285265490350972397", "koi": "5339487433828353468", "kiss": "5474525960143385880", "ali": "5460737770798489825", "black" : "5399878127163811970"
 }
-USE_PREMIUM_EMOJI = bool(PREMIUM_EMOJI_IDS)
-
-
 def _utf16_len(ch: str) -> int:
     """طول المحرف بوحدات UTF-16 (المطلوب لحساب offset/length بكيانات تليكرام)."""
     return len(ch.encode("utf-16-le")) // 2
@@ -465,34 +457,6 @@ def validate_premium_emoji_syntax(text: str) -> tuple[bool, str]:
     return True, ""
 
 
-# ============================================================
-# دوال مساعدة لتنسيق النصوص — للمطور
-# ============================================================
-def fmt_bold(text: str) -> str:
-    """تحويل نص إلى عريض: **النص** ← <b>النص</b>"""
-    return text_to_bold(text)
-
-
-def fmt_italic(text: str) -> str:
-    """تحويل نص إلى مائل: *النص* ← <i>النص</i>"""
-    return text_to_italic(text)
-
-
-def fmt_code(text: str) -> str:
-    """تحويل نص إلى كود: `النص` ← <code>النص</code>"""
-    return text_to_code(text)
-
-
-def fmt_underline(text: str) -> str:
-    """تحويل نص إلى مسطر: __النص__ ← <u>النص</u>"""
-    return text_to_underline(text)
-
-
-def fmt_strikethrough(text: str) -> str:
-    """تحويل نص إلى مشطوب: ~~النص~~ ← <s>النص</s>"""
-    return text_to_strikethrough(text)
-
-
 async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
     """
     أرسل رسالة مع دعم كامل للإيموجي البريميوم والـ HTML.
@@ -531,41 +495,6 @@ async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Mes
             logger.warning("فشل تفسير HTML، سيُرسل كنص خام: %s", e)
             clean_kwargs = {k: v for k, v in kwargs.items() if k != "entities"}
             return await message.reply(html.escape(text), **clean_kwargs)
-        raise
-
-
-async def edit_text_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
-    """
-    عدّل نص رسالة مع دعم الإيموجي البريميوم.
-    """
-    # حوّل النص تلقائياً
-    text = sanitize_and_convert_text(text)
-    
-    # استخرج الإيموجي البريميوم
-    emojis_dict = extract_premium_emojis(text)
-    
-    if emojis_dict:
-        # نظّف tags الإيموجي
-        clean_text = clean_premium_emoji_tags(text)
-        
-        # ابني entities
-        entities = build_premium_entities_from_text(text)
-        
-        try:
-            if entities:
-                return await message.edit_text(clean_text, entities=entities, **kwargs)
-            return await message.edit_text(clean_text, **kwargs)
-        except TelegramBadRequest as e:
-            logger.warning(f"فشل تعديل الرسالة مع إيموجي بريميوم: {e}")
-            return await message.edit_text(clean_text, **kwargs)
-    
-    try:
-        return await message.edit_text(text, **kwargs)
-    except TelegramBadRequest as e:
-        if "can't parse entities" in str(e).lower():
-            logger.warning("فشل تفسير HTML في التعديل")
-            clean_kwargs = {k: v for k, v in kwargs.items() if k != "entities"}
-            return await message.edit_text(html.escape(text), **clean_kwargs)
         raise
 
 
@@ -890,27 +819,9 @@ async def send_text_variable(
     return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
 
-async def reply_rich(message: Message, bot: Bot, html_content: str | None = None,
-                      blocks: list | None = None,
-                      reply_markup: InlineKeyboardMarkup | None = None) -> Message:
-    return await send_rich_message(
-        bot, message.chat.id,
-        html_content=html_content, blocks=blocks,
-        reply_to_message_id=message.message_id,
-        reply_markup=reply_markup,
-    )
-
-
-def render_progress_bar(percent: float, width: int = PROGRESS_BAR_WIDTH) -> str:
-    percent = max(0.0, min(100.0, percent))
-    filled = int(round(width * percent / 100))
-    return "▓" * filled + "░" * (width - filled)
-
-
 # ============================================================
 # رسالة الحالة الغنية (Rich Message) — جدول + إيموجي بريميوم + شريط تظليل
 # ============================================================
-RICH_PROGRESS_BAR_WIDTH = 33
 STATUS_EMOJI_ID = "5463010113440717314"
 STATUS_EMOJI_CHAR = "👀"
 
@@ -1424,14 +1335,6 @@ def tr(var_name: str, user_id: int) -> str:
     return getattr(texts_module, var_name, "")
 
 
-def build_lang_button() -> InlineKeyboardButton:
-    return InlineKeyboardButton(
-        text=texts_module.BTN_LANG,
-        callback_data="lang:toggle",
-        style="success",
-    )
-
-
 def get_developer_vinyl_path(user_id: int, choice_override: str | None = None) -> str:
     choice = choice_override if choice_override is not None else developer_vinyl_choice.get(user_id)
     if choice == "pink":
@@ -1518,10 +1421,7 @@ VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
     ("ali", "BTN_VINYL_ALI"),
 ]
 
-# مصدر وحيد للقيم المقبولة عند اختيار اللون (بدل تكرار نفس القائمة يدويًا
-# بمكانين منفصلين — on_vinyl_choice و on_wiz_color — وهو بالضبط سبب الخطأ
-# الشائع الموثّق بـ خطوات_اضافة_لون_جديد.md: نسيان تحديث أحد المكانين عند
-# إضافة لون جديد فيشتغل بمسار ويفشل بالآخر بصمت).
+# القيم المقبولة لاختيار اللون مشتقة من القائمة نفسها حتى تبقى المسارات متزامنة.
 VALID_VINYL_COLOR_VALUES: frozenset[str] = frozenset(value for value, _ in VINYL_COLOR_CHOICES)
 
 
