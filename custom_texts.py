@@ -1,6 +1,5 @@
 """Persistent custom text overrides managed by the developer panel."""
 
-import json
 import logging
 import os
 import threading
@@ -8,42 +7,24 @@ import time
 from typing import Any
 
 import config
+from storage import JsonStore
 
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 
 CUSTOM_TEXTS_FILE = os.path.join(config.DATA_DIR, "custom_texts.json")
+_store = JsonStore(CUSTOM_TEXTS_FILE)
 
-_custom_data: dict[str, dict[str, Any]] = {}
-
-
-def _load() -> None:
-    global _custom_data
-    if os.path.exists(CUSTOM_TEXTS_FILE):
-        try:
-            with open(CUSTOM_TEXTS_FILE, "r", encoding="utf-8") as f:
-                _custom_data = json.load(f)
-                logger.info("تم تحميل %s نص مخصص", len(_custom_data))
-        except (OSError, ValueError, TypeError):
-            logger.exception("فشل تحميل ملف النصوص المخصصة")
-            _custom_data = {}
-    else:
-        _custom_data = {}
+_custom_data: dict[str, dict[str, Any]] = _store.read()
 
 
 def _save() -> None:
-    os.makedirs(os.path.dirname(CUSTOM_TEXTS_FILE), exist_ok=True)
-    tmp_path = CUSTOM_TEXTS_FILE + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(_custom_data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, CUSTOM_TEXTS_FILE)
-    except (OSError, TypeError):
-        logger.exception("فشل حفظ ملف النصوص المخصصة")
+    _store.write(_custom_data)
 
 
-_load()
+if _custom_data:
+    logger.info("تم تحميل %s نص مخصص", len(_custom_data))
 
 
 def get_custom_rich(var_name: str) -> dict | None:

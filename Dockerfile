@@ -1,11 +1,15 @@
 FROM debian:bookworm-slim AS botapi-build
 
+ARG TELEGRAM_BOT_API_COMMIT=e3e9dd8e5b3d7ab8537cd5a10dc31d5ffa8f82d1
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git make cmake g++ gperf libssl-dev zlib1g-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-RUN git clone --recursive https://github.com/tdlib/telegram-bot-api.git .
+RUN git clone https://github.com/tdlib/telegram-bot-api.git . \
+    && git checkout "${TELEGRAM_BOT_API_COMMIT}" \
+    && git submodule update --init --recursive
 
 RUN mkdir build \
     && cd build \

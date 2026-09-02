@@ -1,7 +1,10 @@
 import os
+
 from dotenv import load_dotenv
 
 from texts import ERR_MISSING_BOT_TOKEN
+from vinyl_catalog import ASSETS_DIR as ASSETS_PATH
+from vinyl_catalog import get_vinyl_style
 
 load_dotenv()
 
@@ -32,33 +35,29 @@ STARS_SUBSCRIPTION_PRICE = int(os.environ.get("STARS_SUBSCRIPTION_PRICE", 50))
 STARS_SUBSCRIPTION_DAYS = int(os.environ.get("STARS_SUBSCRIPTION_DAYS", 30))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+ASSETS_DIR = str(ASSETS_PATH)
 
+# Compatibility exports. New code should query vinyl_catalog directly.
+VINYL_PATH = get_vinyl_style("default").vinyl_path
+VINYL_PINK_PATH = get_vinyl_style("pink").vinyl_path
+VINYL_BLUE_PATH = get_vinyl_style("blue").vinyl_path
+VINYL_YELLOW_PATH = get_vinyl_style("yellow").vinyl_path
+VINYL_RED_PATH = get_vinyl_style("red").vinyl_path
+VINYL_GREEN_PATH = get_vinyl_style("green").vinyl_path
+VINYL_BLOODY_PATH = get_vinyl_style("bloody").vinyl_path
+VINYL_ROSE_PATH = get_vinyl_style("rose").vinyl_path
+VINYL_EMERALD_PATH = get_vinyl_style("emerald").vinyl_path
+VINYL_KOI_PATH = get_vinyl_style("koi").vinyl_path
+VINYL_KISS_PATH = get_vinyl_style("kiss").vinyl_path
+VINYL_ALI_PATH = get_vinyl_style("ali").vinyl_path
 
-def _asset_path(filename: str) -> str:
-    return os.path.join(ASSETS_DIR, filename)
-
-
-VINYL_PATH = _asset_path("vinyl.png")
-VINYL_PINK_PATH = _asset_path("vinyl_pink.png")
-VINYL_BLUE_PATH = _asset_path("vinyl_blue.png")
-VINYL_YELLOW_PATH = _asset_path("vinyl_yellow.png")
-VINYL_RED_PATH = _asset_path("vinyl_red.png")
-VINYL_GREEN_PATH = _asset_path("vinyl_green.png")
-VINYL_BLOODY_PATH = _asset_path("vinyl_bloody.png")
-VINYL_ROSE_PATH = _asset_path("vinyl_rose.png")
-VINYL_EMERALD_PATH = _asset_path("vinyl_emerald.png")
-VINYL_KOI_PATH = _asset_path("vinyl_koi.png")
-VINYL_KISS_PATH = _asset_path("vinyl_kiss.png")
-VINYL_ALI_PATH = _asset_path("vinyl_ali.png")
-
-SHADOW_PATH = _asset_path("shadow.png")
-SHADOW_PINK_PATH = _asset_path("shadow_pink.png")
-SHADOW_BLUE_PATH = _asset_path("shadow_blue.png")
-SHADOW_YELLOW_PATH = _asset_path("shadow_yellow.png")
-SHADOW_RED_PATH = _asset_path("shadow_red.png")
-SHADOW_GREEN_PATH = _asset_path("shadow_green.png")
-SHADOW_ROSE_PATH = _asset_path("shadow_rose.png")
+SHADOW_PATH = get_vinyl_style("default").shadow_path
+SHADOW_PINK_PATH = get_vinyl_style("pink").shadow_path
+SHADOW_BLUE_PATH = get_vinyl_style("blue").shadow_path
+SHADOW_YELLOW_PATH = get_vinyl_style("yellow").shadow_path
+SHADOW_RED_PATH = get_vinyl_style("red").shadow_path
+SHADOW_GREEN_PATH = get_vinyl_style("green").shadow_path
+SHADOW_ROSE_PATH = get_vinyl_style("rose").shadow_path
 
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
 
