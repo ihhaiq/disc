@@ -1,11 +1,4 @@
-"""
-إدارة النصوص المخصصة (Custom Texts) — يحفظها بـ JSON دائم (لا تختفي بعد Restart).
-
-الفكرة:
-- المطور يعدّل النصوص عن طريق لوحة /dev
-- التعديلات تُحفظ بـ DATA_DIR/custom_texts.json (دائم، مربوط بـ Railway Volume)
-- عند الوصول لنص: نتحقق من custom_texts.json أولاً، لو ما فيه ننرجع الافتراضي من texts.py
-"""
+"""Persistent custom text overrides managed by the developer panel."""
 
 import json
 import logging
@@ -18,59 +11,43 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# يحمي _custom_data + الحفظ للملف من تداخل تعديلين متزامنين (مثلاً المطور
-# يعدّل نص عربي بنفس اللحظة اللي load_custom_texts_into_memory شغالة، أو
-# عدة workers تقرأ/تكتب بالتوازي).
 _lock = threading.Lock()
 
 CUSTOM_TEXTS_FILE = os.path.join(config.DATA_DIR, "custom_texts.json")
-
-# البنية:
-# {
-#   "VAR_NAME": {
-#     "value": "القيمة المخصصة",
-#     "updated_at": 1735900000.0,
-#     "editor_id": 123456,
-#     "editor_name": "أحمد"
-#   },
-#   ...
-# }
 
 _custom_data: dict[str, dict[str, Any]] = {}
 
 
 def _load() -> None:
-    """تحميل البيانات من الملف."""
     global _custom_data
     if os.path.exists(CUSTOM_TEXTS_FILE):
         try:
             with open(CUSTOM_TEXTS_FILE, "r", encoding="utf-8") as f:
                 _custom_data = json.load(f)
-                logger.info(f"✅ تم تحميل {len(_custom_data)} نص مخصص")
-        except Exception:
-            logger.exception("❌ فشل تحميل ملف النصوص المخصصة")
+                logger.info("تم تحميل %s نص مخصص", len(_custom_data))
+        except (OSError, ValueError, TypeError):
+            logger.exception("فشل تحميل ملف النصوص المخصصة")
             _custom_data = {}
     else:
         _custom_data = {}
 
 
 def _save() -> None:
-    """حفظ البيانات للملف."""
     os.makedirs(os.path.dirname(CUSTOM_TEXTS_FILE), exist_ok=True)
     tmp_path = CUSTOM_TEXTS_FILE + ".tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(_custom_data, f, ensure_ascii=False, indent=2)
         os.replace(tmp_path, CUSTOM_TEXTS_FILE)
-    except Exception:
-        logger.exception("❌ فشل حفظ ملف النصوص المخصصة")
+    except (OSError, TypeError):
+        logger.exception("فشل حفظ ملف النصوص المخصصة")
 
 
 _load()
 
 
 def get_custom_rich(var_name: str) -> dict | None:
-    """أرجع محتوى Rich Message المحفوظ للمتغير، أو None للنص العادي."""
+    """Return the saved rich-message value for a text override."""
     entry = _custom_data.get(var_name)
     if not entry:
         return None
@@ -85,13 +62,7 @@ def set_custom(
     editor_name: str = "",
     rich: dict | None = None,
 ) -> None:
-    """
-    احفظ نص مخصص.
-
-    ``value`` يبقى دائمًا كنسخة نصية احتياطية حتى تبقى كل أجزاء البوت
-    التي تتوقع ``str`` متوافقة. إذا كان المحتوى Rich Message، يُحفظ تمثيله
-    الخام في ``rich`` ويُستخدم عند الإرسال في سياق يدعم Rich Messages.
-    """
+    """Store a text override and its optional rich-message representation."""
     entry = {
         "value": value,
         "updated_at": time.time(),
@@ -100,15 +71,12 @@ def set_custom(
     }
     if rich is not None:
         entry["rich"] = rich
-    else:
-        # عند تحويل الرسالة من Rich إلى نص عادي لا نبقي المحتوى القديم.
-        entry.pop("rich", None)
     with _lock:
         _custom_data[var_name] = entry
         _save()
-    logger.info(f"✅ تم حفظ نص مخصص: {var_name}")
+    logger.info("تم حفظ نص مخصص: %s", var_name)
 
 
 def list_custom() -> dict[str, Any]:
-    """أرجع قائمة كل النصوص المخصصة."""
-    return dict(_custom_data)
+    with _lock:
+        return dict(_custom_data)

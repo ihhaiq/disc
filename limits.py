@@ -1,10 +1,4 @@
-"""
-حدود الاستخدام اليومي المجاني + إدارة اشتراك نجوم تليكرام (Stars/XTR)
-+ القائمة البيضاء (استثناء أشخاص من كل القيود).
-
-يخزّن كل شيء بملف JSON بسيط داخل config.DATA_DIR (لازم يكون مجلد دائم
-مربوط بـ Railway Volume، وإلا البيانات تنمسح مع كل ديبلوي).
-"""
+"""Usage limits, Telegram Stars access, and the developer whitelist."""
 
 import json
 import logging
@@ -16,23 +10,12 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# قفل عام يحمي كل عمليات القراءة-تعديل-حفظ (read-modify-write) على ملف
-# usage_limits.json من التداخل، خصوصًا الآن بعد وجود عدة workers متوازية
-# (MAX_CONCURRENT_JOBS) قد تستدعي record_usage/toggle_premium_color/... بنفس
-# اللحظة تقريبًا. بدون هذا القفل، تعديلين متزامنين ممكن يتلف أحدهما الثاني
-# (lost update) رغم أن الحفظ النهائي نفسه atomic (.tmp + os.replace).
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 _USAGE_FILE = os.path.join(config.DATA_DIR, "usage_limits.json")
 
 DAY_SECONDS = 24 * 60 * 60
 
-# البنية بالذاكرة:
-# {
-#   "123456": {"count": 2, "window_start": 1735900000.0, "premium_until": 0.0},
-#   "_whitelist": {"987654": {"added_at": 1735900000.0, "note": ""}},
-#   ...
-# }
 _data: dict[str, dict] = {}
 
 _WHITELIST_KEY = "_whitelist"
@@ -44,7 +27,7 @@ def _load() -> None:
         try:
             with open(_USAGE_FILE, "r", encoding="utf-8") as f:
                 _data = json.load(f)
-        except Exception:
+        except (OSError, ValueError, TypeError):
             logger.exception("فشل تحميل ملف حدود الاستخدام، سيتم البدء بملف جديد")
             _data = {}
     else:
@@ -58,7 +41,7 @@ def _save() -> None:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(_data, f)
         os.replace(tmp_path, _USAGE_FILE)
-    except Exception:
+    except (OSError, TypeError):
         logger.exception("فشل حفظ ملف حدود الاستخدام")
 
 
@@ -84,8 +67,8 @@ def _reset_if_needed(uid: int) -> dict:
 
 
 def is_premium(uid: int) -> bool:
-    e = _entry(uid)
-    return time.time() < e.get("premium_until", 0.0)
+    with _lock:
+        return time.time() < _entry(uid).get("premium_until", 0.0)
 
 
 def get_daily_limit(uid: int) -> int:
@@ -99,9 +82,8 @@ def get_count(uid: int) -> int:
 
 
 def can_create(uid: int) -> bool:
-    if is_whitelisted(uid):
-        return True
-    return get_count(uid) < get_daily_limit(uid)
+    with _lock:
+        return is_whitelisted(uid) or get_count(uid) < get_daily_limit(uid)
 
 
 def get_reset_seconds(uid: int) -> float:
@@ -120,7 +102,7 @@ def record_usage(uid: int) -> None:
 
 
 def activate_subscription(uid: int, days: int) -> None:
-    """يفعّل/يمدّد الاشتراك المدفوع بنجوم تليكرام لعدد أيام معيّن."""
+    """Activate a subscription or extend its current expiry."""
     with _lock:
         e = _entry(uid)
         now = time.time()
@@ -130,14 +112,13 @@ def activate_subscription(uid: int, days: int) -> None:
         _save()
 
 
-# --- القائمة البيضاء ---
-
 def _whitelist_dict() -> dict:
     return _data.setdefault(_WHITELIST_KEY, {})
 
 
 def is_whitelisted(uid: int) -> bool:
-    return str(uid) in _whitelist_dict()
+    with _lock:
+        return str(uid) in _whitelist_dict()
 
 
 def add_whitelist(uid: int, note: str = "") -> None:
@@ -158,15 +139,9 @@ def remove_whitelist(uid: int) -> bool:
 
 
 def list_whitelist() -> list[int]:
-    wl = _whitelist_dict()
-    return [int(k) for k in wl.keys()]
+    with _lock:
+        return [int(key) for key in _whitelist_dict()]
 
-
-# --- الألوان المدفوعة (Premium-only vinyl colors) ---
-# نفس فكرة القائمة البيضاء بالضبط: قاموس بمفتاح ثابت داخل نفس ملف JSON
-# الدائم، يخزّن أسماء ألوان الأقراص (قيم developer_vinyl_choice، مثل
-# "pink"، "kiss"، "default"...) اللي المطور قفلها بحيث ما تشتغل إلا
-# للمستخدمين المشتركين (is_premium) أو القائمة البيضاء أو المطور نفسه.
 
 _PREMIUM_COLORS_KEY = "_premium_colors"
 
@@ -176,11 +151,12 @@ def _premium_colors_dict() -> dict:
 
 
 def is_premium_color(color: str) -> bool:
-    return color in _premium_colors_dict()
+    with _lock:
+        return color in _premium_colors_dict()
 
 
 def toggle_premium_color(color: str) -> bool:
-    """يبدّل حالة اللون بين مجاني/مدفوع. يرجّع الحالة الجديدة (True = صار مدفوع)."""
+    """Toggle a color and return whether it is now premium-only."""
     with _lock:
         pc = _premium_colors_dict()
         if color in pc:
