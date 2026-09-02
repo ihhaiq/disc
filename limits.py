@@ -1,51 +1,26 @@
 """Usage limits, Telegram Stars access, and the developer whitelist."""
 
-import json
-import logging
 import os
 import threading
 import time
 
 import config
-
-logger = logging.getLogger(__name__)
+from storage import JsonStore
 
 _lock = threading.RLock()
 
 _USAGE_FILE = os.path.join(config.DATA_DIR, "usage_limits.json")
+_store = JsonStore(_USAGE_FILE, indent=None)
 
 DAY_SECONDS = 24 * 60 * 60
 
-_data: dict[str, dict] = {}
+_data: dict[str, dict] = _store.read()
 
 _WHITELIST_KEY = "_whitelist"
 
 
-def _load() -> None:
-    global _data
-    if os.path.exists(_USAGE_FILE):
-        try:
-            with open(_USAGE_FILE, "r", encoding="utf-8") as f:
-                _data = json.load(f)
-        except (OSError, ValueError, TypeError):
-            logger.exception("فشل تحميل ملف حدود الاستخدام، سيتم البدء بملف جديد")
-            _data = {}
-    else:
-        _data = {}
-
-
 def _save() -> None:
-    os.makedirs(os.path.dirname(_USAGE_FILE), exist_ok=True)
-    tmp_path = _USAGE_FILE + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(_data, f)
-        os.replace(tmp_path, _USAGE_FILE)
-    except (OSError, TypeError):
-        logger.exception("فشل حفظ ملف حدود الاستخدام")
-
-
-_load()
+    _store.write(_data)
 
 
 def _entry(uid: int) -> dict:
@@ -99,6 +74,19 @@ def record_usage(uid: int) -> None:
         e = _reset_if_needed(uid)
         e["count"] = e.get("count", 0) + 1
         _save()
+
+
+def try_record_usage(uid: int) -> bool:
+    """Atomically reserve one daily use when the user still has capacity."""
+    with _lock:
+        if is_whitelisted(uid):
+            return True
+        e = _reset_if_needed(uid)
+        if e.get("count", 0) >= get_daily_limit(uid):
+            return False
+        e["count"] = e.get("count", 0) + 1
+        _save()
+        return True
 
 
 def activate_subscription(uid: int, days: int) -> None:

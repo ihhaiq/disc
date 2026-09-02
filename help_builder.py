@@ -1,6 +1,3 @@
-import logging
-from typing import Any
-
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -8,9 +5,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import config
 import help_storage
 import texts as texts_module
-from handlers import escape_rich_html, safe_reply, send_rich_message, tr
+from handlers import safe_reply, send_rich_message, tr
+from rich_content import extract_rich_content
 
-logger = logging.getLogger(__name__)
 router = Router()
 
 help_awaiting_text: set[int] = set()
@@ -62,70 +59,6 @@ def _root_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🎛 تخصيص", callback_data="help_builder:menu")],
         ]
     )
-
-
-_MEDIA_BLOCK_TYPES = ("video", "photo", "animation", "audio", "document")
-
-
-def _normalize_media_dict(media: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(media, dict):
-        return media
-    if "media" in media:
-        return media
-    file_id = media.get("file_id")
-    return {"media": file_id} if file_id else media
-
-
-def _normalize_blocks_for_input(value: Any) -> Any:
-    if isinstance(value, dict):
-        new_dict = {}
-        for key, item in value.items():
-            if key in _MEDIA_BLOCK_TYPES and isinstance(item, dict):
-                new_dict[key] = _normalize_media_dict(item)
-            else:
-                new_dict[key] = _normalize_blocks_for_input(item)
-        return new_dict
-    if isinstance(value, list):
-        return [_normalize_blocks_for_input(item) for item in value]
-    return value
-
-
-async def _extract_rich_content(message: Message) -> tuple[str | None, list | None]:
-    """Extract rich blocks when available, otherwise return safe HTML."""
-    rich = getattr(message, "rich_message", None)
-    if rich is not None:
-        html_val = getattr(rich, "html", None)
-        if html_val:
-            return html_val, None
-
-        blocks = getattr(rich, "blocks", None)
-        if blocks:
-            try:
-                raw_dump = [
-                    (b.model_dump(exclude_none=True) if hasattr(b, "model_dump") else b)
-                    for b in blocks
-                ]
-            except Exception:
-                logger.exception("فشل تفريغ rich_message.blocks")
-                raw_dump = None
-
-            if raw_dump:
-                logger.debug("rich_message.blocks: %r", raw_dump)
-                return None, _normalize_blocks_for_input(raw_dump)
-            logger.warning(
-                "وصلت رسالة غنية (rich_message.blocks) بدون بنية قابلة للاستخراج"
-            )
-
-    html_text = getattr(message, "html_text", None)
-    if html_text:
-        return html_text, None
-
-    if message.text:
-        return escape_rich_html(message.text), None
-    if message.caption:
-        return escape_rich_html(message.caption), None
-
-    return None, None
 
 
 @router.message(Command("help"))
@@ -271,7 +204,7 @@ async def on_help_text_input(message: Message):
     uid = message.from_user.id
     help_awaiting_text.discard(uid)
 
-    extracted_html, extracted_blocks = await _extract_rich_content(message)
+    extracted_html, extracted_blocks = extract_rich_content(message)
     if not extracted_html and not extracted_blocks:
         help_awaiting_text.add(uid)
         await message.reply(

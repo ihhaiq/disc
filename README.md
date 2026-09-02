@@ -28,7 +28,7 @@ python main.py
 
 | المتغير | الافتراضي | الوصف |
 |---|---|---|
-| `MAX_CONCURRENT_JOBS` | 3 | عدد المعالجات المتزامنة |
+| `MAX_CONCURRENT_JOBS` | 2 | عدد المعالجات المتزامنة |
 | `ROTATION_SECONDS` | 4 | مدة دورة كاملة للقرص (ثانية) |
 | `OUTPUT_FPS` | 30 | إطارات الفيديو الناتج |
 | `DISC_SIZE` | 640 | مقاس الفيديو (مربّع، فيديو نوت بتليكرام) |
@@ -50,7 +50,11 @@ vinylbot/
 ├── compose.py       # لصق صورة الغلاف داخل ثقب القرص (Pillow)
 ├── processor.py     # تدوير القرص + دمج الصوت (ffmpeg)
 ├── limits.py        # حدود الاستخدام والاشتراكات
-├── texts.py         # النصوص والترجمة
+├── texts.py         # النصوص العربية وتنظيف HTML
+├── locales/         # الترجمات المنفصلة
+├── storage/         # تخزين JSON ذري ومشترك
+├── rich_content.py  # استخراج وتطبيع الرسائل الغنية
+├── vinyl_catalog.py # كتالوج القوالب ومساراتها
 ├── config.py        # الإعدادات
 ├── assets/          # قوالب الأقراص والظلال
 ├── temp/            # ملفات مؤقتة (تُحذف تلقائياً بعد كل طلب)
@@ -88,7 +92,7 @@ Templates should remain square PNG images with correct transparency around the d
 
 |---|---|---|
 
-| `MAX_CONCURRENT_JOBS` | 3 | Number of concurrent processors |
+| `MAX_CONCURRENT_JOBS` | 2 | Number of concurrent processors |
 
 | `ROTATION_SECONDS` | 4 | Duration of a full disk rotation (seconds) |
 
@@ -109,9 +113,24 @@ vinylbot/
 ├── compose.py # Paste cover image into disk hole (Pillow)
 ├── processor.py # Disk rotation + audio merging (ffmpeg)
 ├── limits.py # Usage limits and subscriptions
-├── texts.py # Text and translations
+├── texts.py # Arabic source strings and HTML cleanup
+├── locales/ # Separate translations
+├── storage/ # Shared atomic JSON persistence
+├── rich_content.py # Rich-message normalization
+├── vinyl_catalog.py # Vinyl template catalog
 ├── config.py # Settings
 ├── assets/ # Vinyl and shadow templates
 ├── temp/ # Temporary files (automatically deleted after each request)
 └── requirements.txt
 ```
+
+
+## فحوصات التطوير / Development checks
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .
+pytest
+```
+
+`handlers.py` مستثنى مؤقتاً من Ruff إلى أن تكتمل مرحلة تفكيكه إلى routers.
