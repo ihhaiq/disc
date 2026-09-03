@@ -1,16 +1,16 @@
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, Message
 
 import config
 import help_storage
+import keyboard as keyboards
 import texts as texts_module
 from rich_content import extract_rich_content
 from services.localization import tr
 from services.messaging import safe_reply, send_rich_message
 
 router = Router()
-
 help_awaiting_text: set[int] = set()
 help_awaiting_button: set[int] = set()
 
@@ -27,43 +27,6 @@ async def _require_dev(callback: CallbackQuery) -> int | None:
     return None
 
 
-def _buttons_keyboard(buttons: list[dict[str, str]]) -> InlineKeyboardMarkup | None:
-    if not buttons:
-        return None
-    rows = [[InlineKeyboardButton(text=b["text"], url=b["url"])] for b in buttons]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def _builder_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📝 نص الرسالة (Rich Msg)",
-                    callback_data="help_builder:settext",
-                )
-            ],
-            [InlineKeyboardButton(text="➕ اضف زر", callback_data="help_builder:addbtn")],
-            [InlineKeyboardButton(text="👁 معاينة", callback_data="help_builder:preview")],
-            [
-                InlineKeyboardButton(
-                    text="💾 حفظ ونشر",
-                    callback_data="help_builder:save",
-                ),
-                InlineKeyboardButton(text="🔙 رجوع", callback_data="help_builder:back"),
-            ],
-        ],
-    )
-
-
-def _root_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🎛 تخصيص", callback_data="help_builder:menu")],
-        ]
-    )
-
-
 @router.message(Command("help"))
 @router.message(Command("start", magic=F.args == "help"))
 async def on_help(message: Message, bot: Bot):
@@ -78,7 +41,9 @@ async def on_help(message: Message, bot: Bot):
                 html_content=published.get("html"),
                 blocks=published.get("blocks"),
                 reply_to_message_id=message.message_id,
-                reply_markup=_buttons_keyboard(published.get("buttons", [])),
+                reply_markup=keyboards.build_help_buttons_keyboard(
+                    published.get("buttons", [])
+                ),
             )
         else:
             await safe_reply(message, tr("MSG_START_HELP", uid))
@@ -93,7 +58,7 @@ async def on_help(message: Message, bot: Bot):
         html_content=draft.get("html"),
         blocks=draft.get("blocks"),
         reply_to_message_id=message.message_id,
-        reply_markup=_root_keyboard(),
+        reply_markup=keyboards.build_help_root_keyboard(),
     )
 
 
@@ -103,7 +68,7 @@ async def on_help_menu(callback: CallbackQuery):
         return
     await callback.message.reply(
         "⚙️ اختر من ادناه:",
-        reply_markup=_builder_menu_keyboard(),
+        reply_markup=keyboards.build_help_builder_menu_keyboard(),
     )
     await callback.answer()
 
@@ -150,7 +115,7 @@ async def on_help_preview(callback: CallbackQuery, bot: Bot):
         callback.message.chat.id,
         html_content=draft.get("html"),
         blocks=draft.get("blocks"),
-        reply_markup=_buttons_keyboard(draft.get("buttons", [])),
+        reply_markup=keyboards.build_help_buttons_keyboard(draft.get("buttons", [])),
     )
     await callback.answer("👁 هذي المعاينة النهائية مثل ما راح يشوفها المستخدمين")
 
@@ -183,7 +148,7 @@ async def on_help_back(callback: CallbackQuery, bot: Bot):
         callback.message.chat.id,
         html_content=draft.get("html"),
         blocks=draft.get("blocks"),
-        reply_markup=_root_keyboard(),
+        reply_markup=keyboards.build_help_root_keyboard(),
     )
     await callback.answer()
 
@@ -223,7 +188,7 @@ async def on_help_text_input(message: Message):
 
     await message.reply(
         "✅ تم تحديث نص المسودة.",
-        reply_markup=_builder_menu_keyboard(),
+        reply_markup=keyboards.build_help_builder_menu_keyboard(),
     )
 
 
@@ -246,8 +211,7 @@ async def on_help_button_input(message: Message):
     text_part = text_part.strip()
     url_part = url_part.strip()
 
-    has_valid_url = url_part.startswith(("http://", "https://"))
-    if not text_part or not has_valid_url:
+    if not text_part or not url_part.startswith(("http://", "https://")):
         help_awaiting_button.add(uid)
         await message.reply(
             "❌ لازم نص الزر ما يكون فاضي، "
@@ -262,5 +226,5 @@ async def on_help_button_input(message: Message):
 
     await message.reply(
         f"✅ تمت إضافة الزر: {text_part}",
-        reply_markup=_builder_menu_keyboard(),
+        reply_markup=keyboards.build_help_builder_menu_keyboard(),
     )

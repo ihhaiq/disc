@@ -8,15 +8,16 @@ import re
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import Message
 
 import config
 import custom_texts
+import keyboard as keyboards
 import texts as texts_module
-from routers.developer import build_dev_keyboard
 from services.messaging import model_dump as _model_dump
 from services.messaging import rich_text_fallback as _rich_text_fallback
 from services.premium_emoji import extract_premium_emojis, validate_premium_emoji_syntax
+from services.text_markup import process_text_markup
 
 logger = logging.getLogger(__name__)
 router = Router(name=__name__)
@@ -44,30 +45,17 @@ def get_editable_text_value(var_name: str, lang: str) -> str | None:
     return getattr(texts_module, var_name, None)
 
 
-def build_text_list_keyboard(page: int, lang: str = "ar") -> InlineKeyboardMarkup:
+def _text_list_keyboard(page: int, lang: str = "ar"):
     names = get_editable_text_names(lang)
     start = page * TEXTS_PER_PAGE
     page_names = names[start : start + TEXTS_PER_PAGE]
-
-    rows = [
-        [InlineKeyboardButton(text=name, callback_data=f"dev_text:edit:{lang}:{name}")]
-        for name in page_names
-    ]
-
-    nav_row = []
-    if page > 0:
-        nav_row.append(
-            InlineKeyboardButton(text="◀️ السابق", callback_data=f"dev_text:page:{lang}:{page - 1}")
-        )
-    if start + TEXTS_PER_PAGE < len(names):
-        nav_row.append(
-            InlineKeyboardButton(text="التالي ▶️", callback_data=f"dev_text:page:{lang}:{page + 1}")
-        )
-    if nav_row:
-        rows.append(nav_row)
-
-    rows.append([InlineKeyboardButton(text=texts_module.BTN_BACK, callback_data="dev_text:back")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return keyboards.build_dev_text_list_keyboard(
+        page_names,
+        page=page,
+        lang=lang,
+        has_previous=page > 0,
+        has_next=start + TEXTS_PER_PAGE < len(names),
+    )
 
 
 def _text_list_header(page: int, lang: str = "ar") -> str:
@@ -78,31 +66,6 @@ def _text_list_header(page: int, lang: str = "ar") -> str:
     return f"✏️ تحرير النصوص ({lang_label}) — صفحة {page + 1}/{total_pages} ({total} متغيّر):"
 
 
-def process_text_markup(text: str) -> str:
-    """
-    معالجة النصوص المدخلة من المطور: تحويل صيغ خاصة لـ HTML Telegram
-
-    الصيغ المدعومة:
-    - **نص** أو __نص__ → <b>نص</b> (عريض)
-    - *نص* أو _نص_ → <i>نص</i> (مائل)
-    - `نص` → <code>نص</code> (كود)
-    - ~~نص~~ → <s>نص</s> (مشطوب)
-    - <<نص>> → <u>نص</u> (مسطر)
-    - HTML الخام (مثل <h1>, <p>) يتم تنظيفه
-    """
-    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
-    text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
-    text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
-    text = re.sub(r"_(.+?)_", r"<i>\1</i>", text)
-    text = re.sub(r"`(.+?)`", r"<code>\1</code>", text)
-    text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
-    text = re.sub(r"<<(.+?)>>", r"<u>\1</u>", text)
-
-    text = texts_module.clean_html(text)
-
-    return text
-
-
 def update_text_variable(
     var_name: str,
     new_value: str,
@@ -111,19 +74,11 @@ def update_text_variable(
     lang: str = "ar",
     rich_content: dict | None = None,
 ) -> None:
-    """
-    احفظ التعديل بـ JSON دائم (custom_texts.json) بدل تعديل texts.py مباشرة.
-    - يحفظ فوراً بـ DATA_DIR (مربوط بـ Railway Volume)
-    - يبقى بعد Restart/Redeploy
-    - يحتفظ بمعلومات المحرّر والوقت
-    - يدعم لغتين منفصلتين: "ar" (يعدّل texts.py) و "en" (يعدّل TEXTS_EN)
-    """
     processed_value = process_text_markup(new_value)
 
     if lang == "en":
         if var_name not in texts_module.TEXTS_EN:
             raise ValueError(f"المتغيّر {var_name} غير موجود بقاموس TEXTS_EN")
-
         custom_texts.set_custom(
             f"EN::{var_name}",
             processed_value,
@@ -131,7 +86,6 @@ def update_text_variable(
             editor_name=editor_name,
             rich=rich_content,
         )
-
         texts_module.TEXTS_EN[var_name] = processed_value
         return
 
@@ -145,22 +99,16 @@ def update_text_variable(
         editor_name=editor_name,
         rich=rich_content,
     )
-
     setattr(texts_module, var_name, processed_value)
 
 
 async def validate_html_text(bot: Bot, chat_id: int, text: str) -> str | None:
-    """
-    يتحقق إن النص صالح كـ HTML بمعايير تليكرام (وسوم مدعومة + tg-emoji بمعرفات
-    صحيحة) عن طريق محاولة إرسال رسالة تجريبية صامتة ثم حذفها فورًا.
-    يرجّع None لو تمام، أو نص الخطأ لو فيه مشكلة.
-    """
     try:
         test_msg = await bot.send_message(chat_id, text, disable_notification=True)
         await test_msg.delete()
         return None
-    except TelegramBadRequest as e:
-        return str(e)
+    except TelegramBadRequest as exc:
+        return str(exc)
 
 
 @router.callback_query(F.data.startswith("dev_text:page:"))
@@ -172,7 +120,8 @@ async def on_dev_text_page(callback, bot: Bot):
     page = int(page_str)
     dev_text_edit_page[callback.from_user.id] = page
     await callback.message.edit_text(
-        _text_list_header(page, lang), reply_markup=build_text_list_keyboard(page, lang)
+        _text_list_header(page, lang),
+        reply_markup=_text_list_keyboard(page, lang),
     )
     await callback.answer()
 
@@ -180,13 +129,13 @@ async def on_dev_text_page(callback, bot: Bot):
 async def send_text_edit_prompt(
     message: Message, uid: int, var_name: str, lang: str, current_value: str
 ) -> None:
-    """يجهّز جلسة تحرير نص (يخزّن الحالة بـ awaiting_text_value) ويرسل رسالة الطلب."""
     awaiting_text_value[uid] = {"var_name": var_name, "lang": lang}
     preview = current_value if len(current_value) <= 500 else current_value[:500] + "…"
     escaped_preview = html.escape(preview)
     lang_label = "English" if lang == "en" else "عربي"
     await message.reply(
-        f"📝 القيمة الحالية لـ <code>{html.escape(var_name)}</code> ({lang_label}):\n\n<code>{escaped_preview}</code>\n\n"
+        f"📝 القيمة الحالية لـ <code>{html.escape(var_name)}</code> ({lang_label}):\n\n"
+        f"<code>{escaped_preview}</code>\n\n"
         "أرسل النص الجديد الآن ليحل محلها. لإيموجي بريميوم استخدم صيغة:\n"
         "<code>&lt;tg-emoji emoji-id='123'&gt;😀&lt;/tg-emoji&gt;</code>\n"
         "(بايدي رقمي صحيح ومحتوى fallback بالداخل) وسأتحقق منه قبل الحفظ.\n"
@@ -205,7 +154,6 @@ async def on_dev_text_edit(callback, bot: Bot):
     if current_value is None:
         await callback.answer("⚠️ المتغيّر غير موجود", show_alert=True)
         return
-
     await send_text_edit_prompt(
         callback.message, callback.from_user.id, var_name, lang, current_value
     )
@@ -214,10 +162,6 @@ async def on_dev_text_edit(callback, bot: Bot):
 
 @router.message(Command("search"), F.chat.type == "private")
 async def on_dev_search(message: Message, command: CommandObject):
-    """
-    🔍 /search <كلمة البحث>
-    يبحث بأسماء المتغيرات ومحتواها (عربي + إنكليزي) ويرجّع النتائج مع معاينة النص.
-    """
     if not message.from_user or message.from_user.id != config.DEVELOPER_ID:
         return
 
@@ -231,12 +175,10 @@ async def on_dev_search(message: Message, command: CommandObject):
 
     query_lower = query.lower()
     results: list[tuple[str, str, str]] = []
-
     for name in get_editable_text_names("ar"):
         value = getattr(texts_module, name, "") or ""
         if query_lower in value.lower() or query_lower in name.lower():
             results.append(("ar", name, value))
-
     for name in get_editable_text_names("en"):
         value = texts_module.TEXTS_EN.get(name, "") or ""
         if query_lower in value.lower() or query_lower in name.lower():
@@ -246,32 +188,29 @@ async def on_dev_search(message: Message, command: CommandObject):
         await message.reply(f"🔍 لا توجد نتائج لـ: <code>{html.escape(query)}</code>")
         return
 
-    MAX_RESULTS_SHOWN = 15
+    max_results_shown = 15
     lines = [f"🔍 نتائج البحث عن <code>{html.escape(query)}</code> — {len(results)} نتيجة:\n"]
-    for lang, name, value in results[:MAX_RESULTS_SHOWN]:
+    for lang, name, value in results[:max_results_shown]:
         preview = value if len(value) <= 150 else value[:150] + "…"
-        preview_escaped = html.escape(preview)
         lang_label = "EN" if lang == "en" else "AR"
-        lines.append(f"• <b>{html.escape(name)}</b> [{lang_label}]\n<code>{preview_escaped}</code>")
+        lines.append(
+            f"• <b>{html.escape(name)}</b> [{lang_label}]\n<code>{html.escape(preview)}</code>"
+        )
 
-    if len(results) > MAX_RESULTS_SHOWN:
-        lines.append(f"\n… و{len(results) - MAX_RESULTS_SHOWN} نتيجة إضافية، دقق البحث أكثر.")
-
+    if len(results) > max_results_shown:
+        lines.append(
+            f"\n… و{len(results) - max_results_shown} نتيجة إضافية، دقق البحث أكثر."
+        )
     lines.append(
         "\n✏️ للتعديل المباشر استخدم:\n"
         "<code>/edit VAR_NAME</code> (عربي افتراضيًا)\n"
         "<code>/edit VAR_NAME en</code> (إنكليزي)"
     )
-
     await message.reply("\n\n".join(lines))
 
 
 @router.message(Command("edit"), F.chat.type == "private")
 async def on_dev_edit_command(message: Message, command: CommandObject):
-    """
-    ✏️ /edit VAR_NAME [ar|en]
-    يبدأ تحرير مباشر لمتغيّر معيّن بالاسم، بدون الحاجة يتصفح لوحة الأزرار.
-    """
     if not message.from_user or message.from_user.id != config.DEVELOPER_ID:
         return
 
@@ -312,7 +251,6 @@ async def on_dev_edit_command(message: Message, command: CommandObject):
             f"{'الإنكليزية' if lang == 'en' else 'العربية'}."
         )
         return
-
     await send_text_edit_prompt(message, uid, var_name, lang, current_value)
 
 
@@ -323,7 +261,8 @@ async def on_dev_text_back(callback, bot: Bot):
         return
     awaiting_text_value.pop(callback.from_user.id, None)
     await callback.message.edit_text(
-        texts_module.MSG_DEV_CHOOSE_TEMPLATE, reply_markup=build_dev_keyboard()
+        texts_module.MSG_DEV_CHOOSE_TEMPLATE,
+        reply_markup=keyboards.build_dev_keyboard(),
     )
     await callback.answer()
 
@@ -337,41 +276,18 @@ async def on_cancel_text_edit(message: Message):
 
 
 def normalize_dev_input(text: str) -> str:
-    """
-    يطبّع صيغ شائعة قد يلصقها المطور (مثل ماركداون تليكرام الرسمي لصيغة V2)
-    إلى صيغة HTML المدعومة عندنا، عشان ما ترفضها تليكرام أو تطلع فاضية بالغلط:
-
-    - ![إيموجي](tg://emoji?id=123) → <tg-emoji emoji-id="123">إيموجي</tg-emoji>
-      (هذي هي صيغة تليكرام الرسمية للإيموجي المميز بماركداون V2)
-    - \\( \\) \\. \\! إلخ (هروب MarkdownV2) → تُزال لأنها غير مطلوبة بوضع HTML
-    - عناوين ماركداون بأول السطر (# ## ### ...) → تتحول لعريض <b>...</b>
-    """
     if not text:
         return text
-
     text = re.sub(
         r"!\[(.+?)\]\(tg://emoji\?id=(\d+)\)",
         r'<tg-emoji emoji-id="\2">\1</tg-emoji>',
         text,
     )
-
     text = re.sub(r"\\([\\_*\[\]()~`>#+\-=|{}.!])", r"\1", text)
-
-    text = re.sub(r"^#{1,6}\s*(.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
-
-    return text
+    return re.sub(r"^#{1,6}\s*(.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
 
 
 async def _extract_dev_text_content(message: Message) -> tuple[str | None, dict | None]:
-    """
-    يستقبل الاحتمالين اللذين يدعمهما محرر النصوص:
-      1) نص عادي/منسق عادي -> html fallback.
-      2) Rich Message -> نحفظ blocks الخام + is_rtl، بما فيها الصور
-         والفيديوهات والوسائط المضمّنة.
-
-    لا نحاول تحويل Rich Blocks إلى HTML لأن ذلك قد يفقد الصور والجداول
-    والعناوين وباقي البنية الغنية.
-    """
     rich = getattr(message, "rich_message", None)
     if rich is not None:
         rich_data = _model_dump(rich)
@@ -383,7 +299,6 @@ async def _extract_dev_text_content(message: Message) -> tuple[str | None, dict 
                     "blocks": blocks,
                     "is_rtl": rich_data.get("is_rtl"),
                 }
-
             html_value = rich_data.get("html")
             if html_value:
                 return html_value, {
@@ -394,11 +309,9 @@ async def _extract_dev_text_content(message: Message) -> tuple[str | None, dict 
     html_text = getattr(message, "html_text", None)
     if html_text:
         return html_text, None
-
     text = message.text if message.text is not None else message.caption
     if text is not None:
         return text, None
-
     return None, None
 
 
@@ -415,7 +328,6 @@ async def on_text_value_input(message: Message, bot: Bot):
     pending = awaiting_text_value.pop(uid)
     var_name = pending["var_name"]
     lang = pending["lang"]
-
     extracted_value, rich_content = await _extract_dev_text_content(message)
 
     if not extracted_value or not extracted_value.strip():
@@ -433,7 +345,6 @@ async def on_text_value_input(message: Message, bot: Bot):
         emojis_found = {}
     else:
         new_value = normalize_dev_input(extracted_value)
-
         if not new_value.strip():
             awaiting_text_value[uid] = pending
             await message.reply(
@@ -446,7 +357,7 @@ async def on_text_value_input(message: Message, bot: Bot):
         if not is_valid_emoji:
             awaiting_text_value[uid] = pending
             await message.reply(
-                f"❌ خطأ في صيغة الإيموجي البريميوم:\n"
+                "❌ خطأ في صيغة الإيموجي البريميوم:\n"
                 f"<code>{html.escape(emoji_error)}</code>\n\n"
                 "الصيغة الصحيحة:\n"
                 "<code>&lt;tg-emoji emoji-id='123'&gt;🎶&lt;/tg-emoji&gt;</code>\n"
@@ -465,13 +376,11 @@ async def on_text_value_input(message: Message, bot: Bot):
                 "صحّح النص وأرسله مرة ثانية، أو أرسل /cancel_edit للإلغاء."
             )
             return
-
         emojis_found = extract_premium_emojis(new_value)
 
     try:
         user = message.from_user
         editor_name = (user.first_name or user.username or f"User{uid}") if user else "Unknown"
-
         update_text_variable(
             var_name,
             new_value,
@@ -480,15 +389,15 @@ async def on_text_value_input(message: Message, bot: Bot):
             lang=lang,
             rich_content=rich_content,
         )
-    except Exception as e:
+    except Exception as exc:
         logger.exception("فشل حفظ النص المخصص")
-        await message.reply(f"❌ فشل الحفظ:\n<code>{html.escape(str(e))}</code>")
+        await message.reply(f"❌ فشل الحفظ:\n<code>{html.escape(str(exc))}</code>")
         return
 
     emoji_info = ""
     if emojis_found:
         emoji_list = "\n".join(
-            [f"  • {emoji} (ID: {emoji_id})" for emoji, emoji_id in emojis_found.items()]
+            f"  • {emoji} (ID: {emoji_id})" for emoji, emoji_id in emojis_found.items()
         )
         emoji_info = f"\n\n🎯 الإيموجي البريميوم المكتشفة تلقائياً:\n{emoji_list}"
 
@@ -528,5 +437,4 @@ async def on_text_value_input(message: Message, bot: Bot):
         f"{rich_info}"
         f"{emoji_info}"
     )
-
-    await message.reply(success_msg, reply_markup=build_dev_keyboard())
+    await message.reply(success_msg, reply_markup=keyboards.build_dev_keyboard())

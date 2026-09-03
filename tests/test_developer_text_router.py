@@ -1,4 +1,5 @@
-from routers.developer_texts import process_text_markup, router
+from routers.developer_texts import router
+from services.text_markup import process_text_markup
 
 
 def test_developer_text_router_registers_editor_handlers():
