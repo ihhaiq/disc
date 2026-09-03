@@ -41,6 +41,7 @@ TEXTS_EN: dict[str, str] = {
     "BTN_VINYL_KOI": "  ",
     "BTN_VINYL_KISS": "KISS",
     "BTN_VINYL_ALI": "ALI",
+    "BTN_VINYL_OCEAN": "OCEAN",
     "BTN_BACK": "🔙 Back",
     "SPEED_LABEL_FULL": "Full turn",
     "SPEED_LABEL_8RPM": "8 RPM",
