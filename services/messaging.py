@@ -10,7 +10,12 @@ from aiogram.types import InputRichMessage, InlineKeyboardMarkup, Message, Reply
 
 import custom_texts
 from services.localization import get_user_lang, tr
-from texts import clean_html
+from services.premium_emoji import (
+    build_premium_entities_from_text,
+    clean_premium_emoji_tags,
+    extract_premium_emojis,
+)
+from services.text_markup import clean_html
 
 logger = logging.getLogger(__name__)
 RICH_MEDIA_KEYS = frozenset({"photo", "video", "animation", "audio", "voice_note", "document"})
@@ -45,7 +50,8 @@ def normalize_rich_media_for_input(value):
             if candidates:
                 largest = max(
                     candidates,
-                    key=lambda photo: (photo.get("width", 0) or 0) * (photo.get("height", 0) or 0),
+                    key=lambda photo: (photo.get("width", 0) or 0)
+                    * (photo.get("height", 0) or 0),
                 )
                 result[key] = {"media": largest["file_id"]}
             else:
@@ -172,6 +178,33 @@ async def safe_reply(message: Message, text: str, **kwargs) -> Message:
             parse_mode=None,
             **clean_kwargs,
         )
+
+
+async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
+    text = sanitize_text(text)
+    emojis = extract_premium_emojis(text)
+    if emojis:
+        clean_text = clean_premium_emoji_tags(text)
+        entities = build_premium_entities_from_text(text)
+        try:
+            if entities:
+                return await message.reply(clean_text, entities=entities, **kwargs)
+            return await message.reply(clean_text, **kwargs)
+        except TelegramBadRequest as exc:
+            logger.warning(
+                "فشل إرسال رسالة مع إيموجي بريميوم: %s, سيتم الإرسال بدونها",
+                exc,
+            )
+            return await message.reply(clean_text, **kwargs)
+
+    try:
+        return await message.reply(text, **kwargs)
+    except TelegramBadRequest as exc:
+        if "can't parse entities" not in str(exc).lower():
+            raise
+        logger.warning("فشل تفسير HTML، سيُرسل كنص خام: %s", exc)
+        clean_kwargs = {key: value for key, value in kwargs.items() if key != "entities"}
+        return await message.reply(html.escape(text), **clean_kwargs)
 
 
 async def reply_text_variable(
