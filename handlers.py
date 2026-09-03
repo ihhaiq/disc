@@ -17,7 +17,7 @@ from aiogram.types import (
 
 from compose import build_disc
 import keyboard as keyboards
-from processor import get_duration, render_vinyl, render_preview
+from processor import get_duration, render_vinyl
 import config
 import limits
 import texts as texts_module
@@ -52,6 +52,7 @@ from routers.start import create_start_router
 from routers.developer import awaiting_menu_image
 from routers.developer import router as developer_router
 from routers.developer_texts import router as developer_text_router
+from routers.wizard import WizardRuntime, create_wizard_router
 from vinyl_catalog import VINYL_STYLES, get_vinyl_style
 
 logger = logging.getLogger(__name__)
@@ -217,7 +218,6 @@ user_pending_jobs: dict[int, set[str]] = {}
 tracked_jobs: dict[str, dict] = {}
 canceled_job_ids: set[str] = set()
 developer_vinyl_choice: dict[int, str] = {}
-wizard_state: dict[int, dict] = {}
 WIZARD_TTL_SECONDS = 600
 
 developer_menu_image_file_id: str | None = None
@@ -685,29 +685,9 @@ def _cleanup_expired_pending_audio() -> int:
         entry = pending_audio.get(key)
         if entry is None or now > entry.get("expires_at", 0):
             pending_audio.pop(key, None)
-            wizard_state.pop(key, None)
+            wizard.reset(key)
             if isinstance(key, int):
                 pending_images.pop(key, None)
-            removed += 1
-    return removed
-
-
-def _cleanup_orphaned_wizard_state() -> int:
-    """أي wizard_state ما له entry مقابل بـ pending_audio يُعتبر يتيمًا (orphan)."""
-    removed = 0
-    for key in list(wizard_state.keys()):
-        if key not in pending_audio:
-            wizard_state.pop(key, None)
-            removed += 1
-    return removed
-
-
-def _cleanup_expired_pending_confirm() -> int:
-    now = time.time()
-    removed = 0
-    for uid, job in list(pending_confirm.items()):
-        if now > job.get("confirm_expires_at", 0):
-            pending_confirm.pop(uid, None)
             removed += 1
     return removed
 
@@ -728,8 +708,8 @@ async def _periodic_cleanup_loop() -> None:
         try:
             await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
             n1 = _cleanup_expired_pending_audio()
-            n2 = _cleanup_orphaned_wizard_state()
-            n3 = _cleanup_expired_pending_confirm()
+            n2 = wizard.cleanup_orphaned()
+            n3 = wizard.cleanup_expired_confirm()
             n4 = _cleanup_orphaned_channel_reply_index()
             total = n1 + n2 + n3 + n4
             if total:
@@ -877,19 +857,6 @@ def _vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
     return keyboards.build_vinyl_color_keyboard(
         user_id,
         current_choice=developer_vinyl_choice.get(user_id),
-        has_premium=user_has_premium_access(user_id),
-    )
-
-
-def _wiz_color_keyboard(
-    user_id: int = 0,
-    channel_chat_id: int | None = None,
-    channel_message_id: int | None = None,
-) -> InlineKeyboardMarkup:
-    return keyboards.build_wiz_color_keyboard(
-        user_id,
-        channel_chat_id,
-        channel_message_id,
         has_premium=user_has_premium_access(user_id),
     )
 
@@ -1210,7 +1177,7 @@ async def on_channel_audio(message: Message, bot: Bot):
         "uid": key,
         "channel_msg_ids": [],
     }
-    wizard_state.pop(key, None)
+    wizard.reset(key)
 
     keyboard = keyboards.build_mode_keyboard(
         key,
@@ -1270,7 +1237,7 @@ async def on_audio(message: Message, bot: Bot):
         "uid": owner_id,
         "owner_user_id": owner_id,
     }
-    wizard_state.pop(uid, None)
+    wizard.reset(uid)
     pending_images.pop(uid, None)
 
     keyboard = keyboards.build_mode_keyboard(owner_id)
@@ -1296,7 +1263,7 @@ def _get_pending_audio_or_none(uid: int) -> dict | None:
     pending = pending_audio.get(uid)
     if not pending or time.time() > pending["expires_at"]:
         pending_audio.pop(uid, None)
-        wizard_state.pop(uid, None)
+        wizard.reset(uid)
         return None
     return pending
 
@@ -1405,28 +1372,6 @@ async def on_mode_quick(callback, bot: Bot):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("mode:custom"))
-async def on_mode_custom(callback, bot: Bot):
-    resolved = await resolve_callback_uid(callback, bot)
-    if resolved is None:
-        return
-    _, uid, _channel_chat_id = resolved
-    pending = _get_pending_audio_or_none(uid)
-    if not pending:
-        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
-        return
-    wizard_state[uid] = {}
-    ch_chat, ch_msg = _channel_ctx(uid)
-    await _edit_wizard_text(
-        bot,
-        uid,
-        callback.message,
-        tr("MSG_WIZ_CHOOSE_COLOR", uid),
-        reply_markup=_wiz_color_keyboard(uid, ch_chat, ch_msg),
-    )
-    await callback.answer()
-
-
 def _channel_ctx(uid) -> tuple[int | None, int | None]:
     """
     يستخرج (chat_id, message_id) من مفتاح سياق القناة أو المجموعة، أو
@@ -1442,284 +1387,6 @@ def _channel_ctx(uid) -> tuple[int | None, int | None]:
         return int(chat_str), int(msg_str)
     except ValueError:
         return None, None
-
-
-@router.callback_query(F.data.startswith("wiz_color:"))
-async def on_wiz_color(callback, bot: Bot):
-    resolved = await resolve_callback_uid(callback, bot)
-    if resolved is None:
-        return
-    base, uid, _channel_chat_id = resolved
-    state = wizard_state.get(uid)
-    if state is None or not _get_pending_audio_or_none(uid):
-        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
-        return
-    choice = base.split(":", 1)[1]
-    presser_id = callback.from_user.id if callback.from_user else 0
-    if choice in VALID_VINYL_COLOR_VALUES:
-        if limits.is_premium_color(choice) and not user_has_premium_access(presser_id):
-            await callback.answer(tr("MSG_COLOR_PREMIUM_ONLY", presser_id), show_alert=True)
-            await callback.message.reply(
-                tr("MSG_COLOR_PREMIUM_ONLY", presser_id),
-                reply_markup=keyboards.build_buy_stars_keyboard(presser_id),
-            )
-            return
-        if choice == "default":
-            developer_vinyl_choice.pop(uid, None)
-        else:
-            developer_vinyl_choice[uid] = choice
-    else:
-        developer_vinyl_choice.pop(uid, None)
-
-    ch_chat, ch_msg = _channel_ctx(uid)
-    await _edit_wizard_text(
-        bot,
-        uid,
-        callback.message,
-        tr("MSG_WIZ_CHOOSE_SPEED", uid),
-        reply_markup=keyboards.build_wiz_speed_keyboard(uid, ch_chat, ch_msg),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("wiz_speed:"))
-async def on_wiz_speed(callback, bot: Bot):
-    resolved = await resolve_callback_uid(callback, bot)
-    if resolved is None:
-        return
-    base, uid, _channel_chat_id = resolved
-    state = wizard_state.get(uid)
-    pending = _get_pending_audio_or_none(uid)
-    if state is None or not pending:
-        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
-        return
-    value = base.split(":", 1)[1]
-    user_rotation_seconds[uid] = 0.0 if value == "full" else 60 / float(value)
-
-    has_thumb = bool(pending["audio"].thumbnail)
-    ch_chat, ch_msg = _channel_ctx(uid)
-    image_text = (
-        texts_module.MSG_CHANNEL_ASK_IMAGE_REPLY_WITH_SKIP
-        if ch_chat is not None and has_thumb
-        else texts_module.MSG_CHANNEL_ASK_IMAGE_REPLY
-        if ch_chat is not None
-        else tr("MSG_WIZ_CHOOSE_IMAGE", uid)
-    )
-    await _edit_wizard_text(
-        bot,
-        uid,
-        callback.message,
-        image_text,
-        reply_markup=keyboards.build_wiz_image_keyboard(has_thumb, uid, ch_chat, ch_msg),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("wiz_image:skip"))
-async def on_wiz_image_skip(callback, bot: Bot):
-    resolved = await resolve_callback_uid(callback, bot)
-    if resolved is None:
-        return
-    _, uid, _channel_chat_id = resolved
-    pending = _get_pending_audio_or_none(uid)
-    state = wizard_state.get(uid)
-    if state is None or not pending:
-        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
-        return
-    if not pending["audio"].thumbnail:
-        await callback.answer(tr("MSG_WIZ_NO_IMAGE_TO_SKIP", uid), show_alert=True)
-        return
-    await _wiz_advance_to_segment_or_finish(
-        bot,
-        uid,
-        callback.message,
-        lambda text, **kwargs: _edit_wizard_text(bot, uid, callback.message, text, **kwargs),
-    )
-    await callback.answer()
-
-
-async def _wiz_advance_to_segment_or_finish(
-    bot: Bot, uid, target_message: Message, send_func
-) -> None:
-    pending = pending_audio.get(uid)
-    if not pending:
-        return
-    audio = pending["audio"]
-    total_duration = audio.duration or 0
-
-    if total_duration <= config.MAX_DURATION_SECONDS:
-        await _finish_wizard(bot, uid, send_func, segment_start=0.0)
-        return
-
-    ch_chat, ch_msg = _channel_ctx(uid)
-    sent = await send_func(
-        tr("MSG_WIZ_CHOOSE_SEGMENT", uid),
-        reply_markup=keyboards.build_wiz_segment_keyboard(total_duration, uid, ch_chat, ch_msg),
-    )
-    if (
-        _is_shared_context(uid)
-        and sent is not None
-        and sent.message_id not in pending.get("channel_msg_ids", [])
-    ):
-        pending.setdefault("channel_msg_ids", []).append(sent.message_id)
-
-
-@router.callback_query(F.data.startswith("wiz_segment:"))
-async def on_wiz_segment(callback, bot: Bot):
-    resolved = await resolve_callback_uid(callback, bot)
-    if resolved is None:
-        return
-    base, uid, _channel_chat_id = resolved
-    start_seconds = float(base.split(":", 1)[1])
-    await _finish_wizard(
-        bot,
-        uid,
-        lambda text, **kwargs: _edit_wizard_text(bot, uid, callback.message, text, **kwargs),
-        segment_start=start_seconds,
-    )
-    await callback.answer()
-
-
-async def _finish_wizard(bot: Bot, uid, send_func, segment_start: float) -> None:
-    pending = pending_audio.pop(uid, None)
-    wizard_state.pop(uid, None)
-    if not pending:
-        await send_func(tr("MSG_WIZ_EXPIRED", uid))
-        return
-
-    job = dict(pending)
-    owner_id = pending.get("owner_user_id", uid)
-    job["uid"] = owner_id
-    job["context_key"] = uid
-    job["segment_start"] = segment_start
-    job["vinyl_choice"] = developer_vinyl_choice.get(uid)
-    job["rotation_seconds"] = user_rotation_seconds.get(uid, config.ROTATION_SECONDS)
-
-    if _is_group_context(uid):
-        job["status_ephemeral_message_id"] = _ephemeral_id(pending)
-        await _launch_job(bot, owner_id, job)
-        return
-
-    if _is_channel_context(uid):
-        starting_text = tr("MSG_WIZ_STARTING", owner_id)
-        entities = build_premium_entities_from_text(starting_text)
-        sent = (
-            await send_func(starting_text, entities=entities)
-            if entities
-            else await send_func(starting_text)
-        )
-        if sent is not None:
-            job.setdefault("channel_msg_ids", [])
-            if sent.message_id not in job["channel_msg_ids"]:
-                job["channel_msg_ids"].append(sent.message_id)
-        await _launch_job(bot, owner_id, job)
-        return
-
-    job["confirm_expires_at"] = time.time() + WIZARD_TTL_SECONDS
-    pending_confirm[owner_id] = job
-    await send_func(
-        tr("MSG_WIZ_REVIEW", owner_id),
-        reply_markup=keyboards.build_wiz_confirm_keyboard(owner_id),
-    )
-
-
-pending_confirm: dict[int, dict] = {}
-
-
-async def _run_quick_preview(bot: Bot, target_message: Message, uid: int, job: dict) -> None:
-    """
-    يولّد معاينة سريعة (٣ ثواني، دقة منخفضة) بنفس إعدادات المستخدم المختارة
-    (اللون/السرعة/الصورة/المقطع) ويرسلها كفيديو عادي — مو Video Note — عشان
-    يتأكد المستخدم من الشكل قبل ما ينتظر الإنتاج الكامل.
-    """
-    audio = job["audio"]
-    job_id = job["job_id"]
-    ext = audio.file_name.split(".")[-1] if audio.file_name else "mp3"
-    preview_audio_path = tmp(f"preview_{uid}_{job_id}_audio.{ext}")
-    preview_thumb_path = tmp(f"preview_{uid}_{job_id}_thumb.jpg")
-    preview_disc_path = tmp(f"preview_{uid}_{job_id}_disc.png")
-    preview_out_path = tmp(f"preview_{uid}_{job_id}_out.mp4")
-
-    try:
-        await bot.send_chat_action(target_message.chat.id, action=ChatAction.UPLOAD_VIDEO)
-        await download_with_retries(
-            bot, audio.file_id, preview_audio_path, timeout_seconds=180, retries=2
-        )
-
-        thumbnail_file_id = job.get("thumbnail_file_id")
-        if not thumbnail_file_id and getattr(audio, "thumbnail", None) is not None:
-            thumbnail_file_id = audio.thumbnail.file_id
-        if not thumbnail_file_id:
-            await target_message.reply(texts_module.ERR_NO_THUMBNAIL_AVAILABLE)
-            return
-        await download_with_retries(
-            bot, thumbnail_file_id, preview_thumb_path, timeout_seconds=60, retries=2
-        )
-
-        vinyl_choice = job.get("vinyl_choice")
-        await asyncio.to_thread(
-            build_disc,
-            preview_thumb_path,
-            get_developer_vinyl_path(uid, vinyl_choice),
-            preview_disc_path,
-            get_developer_hole_ratio(vinyl_choice),
-            config.DISC_SIZE,
-        )
-        shadow_path = get_developer_shadow_path(uid, vinyl_choice)
-
-        await render_preview(
-            preview_disc_path,
-            shadow_path,
-            preview_audio_path,
-            preview_out_path,
-            rotation_seconds=job.get("rotation_seconds", get_user_rotation_seconds(uid)),
-            native_size=config.DISC_SIZE,
-            start_offset=job.get("segment_start", 0.0),
-        )
-
-        await target_message.reply_video(
-            FSInputFile(preview_out_path),
-            caption=tr("MSG_PREVIEW_READY_CAPTION", uid),
-            reply_markup=keyboards.build_wiz_confirm_keyboard(uid),
-        )
-    except Exception:
-        logger.exception("فشل توليد المعاينة السريعة")
-        try:
-            await target_message.reply(
-                tr("MSG_PROCESSING_ERROR_FMT", uid).format(error_text="preview failed")
-            )
-        except Exception:
-            pass
-    finally:
-        cleanup(preview_audio_path, preview_thumb_path, preview_disc_path, preview_out_path)
-
-
-@router.callback_query(F.data == "wiz_preview_confirm")
-async def on_wiz_preview_confirm(callback, bot: Bot):
-    uid = callback.from_user.id if callback.from_user else 0
-    job = pending_confirm.get(uid)
-    if not job:
-        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
-        return
-    await callback.answer(tr("MSG_PREVIEW_STARTING", uid))
-    await _run_quick_preview(bot, callback.message, uid, job)
-
-
-@router.callback_query(F.data == "wiz_full_confirm")
-async def on_wiz_full_confirm(callback, bot: Bot):
-    uid = callback.from_user.id if callback.from_user else 0
-    job = pending_confirm.pop(uid, None)
-    if not job:
-        await callback.answer(tr("MSG_WIZ_EXPIRED", uid), show_alert=True)
-        return
-    await callback.answer()
-    starting_text = tr("MSG_WIZ_STARTING", uid)
-    entities = build_premium_entities_from_text(starting_text)
-    if entities:
-        await callback.message.reply(starting_text, entities=entities)
-    else:
-        await callback.message.reply(starting_text)
-    await _launch_job(bot, uid, job)
 
 
 @router.callback_query(F.data.startswith("cancel_queue"))
@@ -1741,9 +1408,7 @@ async def on_cancel_queue(callback, bot: Bot):
     else:
         await edit_text_variable(callback.message, bot, "MSG_QUEUE_CANCELED_EDIT", uid)
     pending_audio.pop(uid, None)
-    wizard_state.pop(uid, None)
-    if isinstance(uid, int):
-        pending_confirm.pop(uid, None)
+    wizard.cancel(uid)
     await callback.answer(tr("MSG_QUEUE_CANCELED_ANSWER", uid))
 
 
@@ -1778,7 +1443,7 @@ async def on_channel_photo_reply(message: Message, bot: Bot):
     pending["thumbnail_file_id"] = photo.file_id
     pending.setdefault("channel_msg_ids", []).append(message.message_id)
 
-    if pending.pop("awaiting_reply_image", False) and key not in wizard_state:
+    if pending.pop("awaiting_reply_image", False) and not wizard.has_active(key):
         pending_audio.pop(key, None)
         job = dict(pending)
         job["context_key"] = key
@@ -1786,7 +1451,7 @@ async def on_channel_photo_reply(message: Message, bot: Bot):
         await _launch_job(bot, key, job)
         return
 
-    await _wiz_advance_to_segment_or_finish(bot, key, message, message.reply)
+    await wizard.advance_to_segment_or_finish(bot, key, message.reply)
 
 
 @router.message(F.photo)
@@ -1805,25 +1470,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         await message.reply(texts_module.MSG_DEV_MENU_IMAGE_SAVED)
         return
 
-    if uid in wizard_state:
-        pending_entry = _get_pending_audio_or_none(uid)
-        if not pending_entry:
-            await reply_text_variable(message, bot, "MSG_AUDIO_EXPIRED", uid)
-            return
-        photo = message.photo[-1]
-        pending_entry["thumbnail_file_id"] = photo.file_id
-        if _is_group_context(uid):
-            original = pending_entry.get("message")
-            await edit_wizard_text_variable(bot, uid, original, "MSG_IMAGE_RECEIVED")
-            await _wiz_advance_to_segment_or_finish(
-                bot,
-                uid,
-                original,
-                lambda text, **kwargs: _edit_wizard_text(bot, uid, original, text, **kwargs),
-            )
-        else:
-            await reply_text_variable(message, bot, "MSG_IMAGE_RECEIVED", uid)
-            await _wiz_advance_to_segment_or_finish(bot, uid, message, message.reply)
+    if await wizard.handle_photo(message, bot, uid):
         return
 
     pending = pending_images.get(uid)
@@ -1928,6 +1575,31 @@ async def on_speed_selected(callback, bot: Bot):
     await callback.answer(tr("MSG_SPEED_SAVED_ANSWER", user_id))
 
 
+wizard = WizardRuntime(
+    pending_audio=pending_audio,
+    user_rotation_seconds=user_rotation_seconds,
+    developer_vinyl_choice=developer_vinyl_choice,
+    valid_vinyl_colors=VALID_VINYL_COLOR_VALUES,
+    ttl_seconds=WIZARD_TTL_SECONDS,
+    resolve_callback_uid=resolve_callback_uid,
+    get_pending_audio=_get_pending_audio_or_none,
+    edit_wizard_text=_edit_wizard_text,
+    edit_wizard_text_variable=edit_wizard_text_variable,
+    reply_text_variable=reply_text_variable,
+    launch_job=_launch_job,
+    channel_ctx=_channel_ctx,
+    ephemeral_id=_ephemeral_id,
+    user_has_premium_access=user_has_premium_access,
+    download_with_retries=download_with_retries,
+    temp_path=tmp,
+    cleanup=cleanup,
+    get_vinyl_path=get_developer_vinyl_path,
+    get_shadow_path=get_developer_shadow_path,
+    get_hole_ratio=get_developer_hole_ratio,
+    get_rotation_seconds=get_user_rotation_seconds,
+)
+
+router.include_router(create_wizard_router(wizard))
 router.include_router(developer_router)
 router.include_router(developer_text_router)
 router.include_router(
