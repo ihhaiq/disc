@@ -1,4 +1,7 @@
-from routers.wizard import WizardRuntime, create_wizard_router
+from routers.wizard import WizardHooks, WizardRuntime, create_wizard_router
+from services.ephemeral import EphemeralMessenger
+from services.vinyl_settings import VinylSettings
+from services.wizard_preview import WizardPreviewService
 
 
 async def _async_noop(*args, **kwargs):
@@ -10,28 +13,31 @@ def _noop(*args, **kwargs):
 
 
 def _runtime():
-    return WizardRuntime(
-        pending_audio={},
-        user_rotation_seconds={},
-        developer_vinyl_choice={},
-        valid_vinyl_colors=frozenset(),
-        ttl_seconds=600,
-        resolve_callback_uid=_async_noop,
-        get_pending_audio=_noop,
-        edit_wizard_text=_async_noop,
-        edit_wizard_text_variable=_async_noop,
-        reply_text_variable=_async_noop,
-        launch_job=_async_noop,
-        channel_ctx=lambda uid: (None, None),
-        ephemeral_id=_noop,
-        user_has_premium_access=lambda uid: False,
+    pending_audio = {}
+    vinyl_settings = VinylSettings()
+    ephemeral = EphemeralMessenger(pending_audio)
+    preview_service = WizardPreviewService(
+        vinyl_settings=vinyl_settings,
         download_with_retries=_async_noop,
         temp_path=lambda name: name,
         cleanup=_noop,
-        get_vinyl_path=_noop,
-        get_shadow_path=_noop,
-        get_hole_ratio=_noop,
-        get_rotation_seconds=_noop,
+    )
+    hooks = WizardHooks(
+        resolve_callback_uid=_async_noop,
+        get_pending_audio=_noop,
+        reply_text_variable=_async_noop,
+        launch_job=_async_noop,
+        channel_ctx=lambda uid: (None, None),
+        user_has_premium_access=lambda uid: False,
+    )
+    return WizardRuntime(
+        pending_audio=pending_audio,
+        vinyl_settings=vinyl_settings,
+        ephemeral=ephemeral,
+        preview_service=preview_service,
+        hooks=hooks,
+        valid_vinyl_colors=frozenset(),
+        ttl_seconds=600,
     )
 
 
