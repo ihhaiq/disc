@@ -11,7 +11,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import (
     Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
-    LabeledPrice, PreCheckoutQuery, MessageEntity,
+    MessageEntity,
     InputRichMessage, ReplyParameters,
 )
 
@@ -31,7 +31,9 @@ from services.contexts import is_shared_context as _is_shared_context
 from services.contexts import split_context_suffix as _split_channel_suffix
 from services.contexts import with_context_suffix as _with_channel_suffix
 from services.localization import get_user_lang, load_custom_texts_into_memory, tr, user_language
-from services.payments import build_subscription_payload, validate_subscription_payment
+from routers.language import create_language_router
+from routers.payments import create_payment_router
+from routers.start import create_start_router
 from vinyl_catalog import VINYL_STYLES, get_vinyl_style
 logger = logging.getLogger(__name__)
 router = Router()
@@ -2404,14 +2406,6 @@ async def on_text_value_input(message: Message, bot: Bot):
     await message.reply(success_msg, reply_markup=build_dev_keyboard())
 
 
-@router.message(Command("start"), F.chat.type == "private")
-async def on_start(message: Message, bot: Bot):
-    uid = message.from_user.id if message.from_user else 0
-    me = await bot.get_me()
-    await reply_text_variable(
-        message, bot, "MSG_START_HELP", uid,
-        reply_markup=build_start_keyboard(uid, me.username),
-    )
 @router.callback_query(F.data == "customize:open")
 async def on_customize_open(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
@@ -2476,43 +2470,6 @@ async def on_vinyl_menu_back(callback, bot: Bot):
         await callback.message.edit_text("⚙️ تخصيص إعدادات القرص:", reply_markup=build_customize_keyboard(user_id))
     await callback.answer()
 
-
-@router.callback_query(F.data == "lang:toggle")
-async def on_lang_toggle(callback, bot: Bot):
-    user_id = callback.from_user.id if callback.from_user else 0
-    new_lang = "en" if get_user_lang(user_id) == "ar" else "ar"
-    user_language[user_id] = new_lang
-
-    # نعيد رسم الرسالة الحالية باللغة الجديدة (نتعامل مع رسالة البداية أو قائمة الألوان)
-    current_markup = callback.message.reply_markup
-    is_color_menu = bool(current_markup and any(
-        btn.callback_data and btn.callback_data.startswith("vinyl:")
-        for row in current_markup.inline_keyboard for btn in row
-    ))
-    is_customize_menu = bool(current_markup and any(
-        btn.callback_data and (btn.callback_data.startswith("speed:") or btn.callback_data == "vinyl_menu:open")
-        for row in current_markup.inline_keyboard for btn in row
-    ))
-    try:
-        if is_color_menu:
-            await edit_text_variable(
-                callback.message, bot, "MSG_VINYL_COLOR_INFO", user_id,
-                reply_markup=build_vinyl_color_keyboard(user_id),
-            )
-        elif is_customize_menu:
-            await callback.message.edit_text(
-                "⚙️ تخصيص إعدادات القرص:" if get_user_lang(user_id) == "ar" else "⚙️ Customize your disc settings:",
-                reply_markup=build_customize_keyboard(user_id),
-            )
-        else:
-            me = await bot.get_me()
-            await edit_text_variable(
-                callback.message, bot, "MSG_START_HELP", user_id,
-                reply_markup=build_start_keyboard(user_id, me.username),
-            )
-    except TelegramBadRequest:
-        pass
-    await callback.answer("✅ EN" if new_lang == "en" else "✅ AR")
 
 @router.channel_post(F.audio)
 async def on_channel_audio(message: Message, bot: Bot):
@@ -3400,81 +3357,13 @@ async def on_speed_selected(callback, bot: Bot):
     await callback.answer(tr("MSG_SPEED_SAVED_ANSWER", user_id))
 
 
-@router.message((F.video | F.voice | F.document), F.chat.type == "private")
-async def on_wrong_type(message: Message, bot: Bot):
-    # ⚠️ إصلاح: كانت الدالة لا تستقبل "bot" كمعامل رغم استخدامه بالداخل، وهذا
-    # كان يسبب NameError (انهيار الـ handler كاملًا) لأي محاولة إرسال فيديو/
-    # صوتية عادية/مستند بالخاص. aiogram يحقن "bot" تلقائيًا لو أُعلن كمعامل.
-    uid = message.from_user.id if message.from_user else 0
-    await reply_text_variable(message, bot, "MSG_WRONG_TYPE", uid)
-
-
-@router.callback_query(F.data == "buy_stars")
-async def on_buy_stars(callback, bot: Bot):
-    uid = callback.from_user.id if callback.from_user else 0
-    await bot.send_invoice(
-        chat_id=callback.message.chat.id,
-        title=texts_module.MSG_INVOICE_TITLE,
-        description=texts_module.MSG_INVOICE_DESCRIPTION_FMT.format(limit=config.PREMIUM_DAILY_LIMIT),
-        payload=build_subscription_payload(uid, int(time.time())),
-        provider_token="",  # فارغ إجباريًا لمدفوعات نجوم تليكرام (XTR)
-        currency="XTR",
-        prices=[LabeledPrice(label=texts_module.MSG_INVOICE_LABEL, amount=config.STARS_SUBSCRIPTION_PRICE)],
+router.include_router(
+    create_language_router(
+        edit_text_variable,
+        build_vinyl_color_keyboard,
+        build_customize_keyboard,
+        build_start_keyboard,
     )
-    await callback.answer()
-
-
-@router.pre_checkout_query()
-async def on_pre_checkout(pre_checkout_query: PreCheckoutQuery, bot: Bot):
-    check = validate_subscription_payment(
-        payload=pre_checkout_query.invoice_payload,
-        currency=pre_checkout_query.currency,
-        amount=pre_checkout_query.total_amount,
-        user_id=pre_checkout_query.from_user.id,
-        expected_amount=config.STARS_SUBSCRIPTION_PRICE,
-    )
-    if check.valid:
-        await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
-    else:
-        await bot.answer_pre_checkout_query(
-            pre_checkout_query.id,
-            ok=False,
-            error_message=tr("MSG_PAYMENT_INVALID", pre_checkout_query.from_user.id),
-        )
-
-
-@router.message(F.successful_payment, F.chat.type == "private")
-async def on_successful_payment(message: Message, bot: Bot):
-    uid = message.from_user.id if message.from_user else 0
-    payment = message.successful_payment
-    check = validate_subscription_payment(
-        payload=payment.invoice_payload,
-        currency=payment.currency,
-        amount=payment.total_amount,
-        user_id=uid,
-        expected_amount=config.STARS_SUBSCRIPTION_PRICE,
-    )
-    if not check.valid:
-        logger.warning("رفض دفعة غير مطابقة للمستخدم %s: %s", uid, check.reason)
-        await reply_text_variable(message, bot, "MSG_PAYMENT_INVALID", uid)
-        return
-    limits.activate_subscription(uid, config.STARS_SUBSCRIPTION_DAYS)
-    logger.info(texts_module.LOG_PAYMENT_RECORDED, uid)
-    await reply_text_variable(message, bot, "MSG_PAYMENT_SUCCESS_FMT", uid, limit=config.PREMIUM_DAILY_LIMIT)
-
-    if config.DEVELOPER_ID:
-        user = message.from_user
-        try:
-            await bot.send_message(
-                config.DEVELOPER_ID,
-                texts_module.MSG_NEW_SUBSCRIBER_ADMIN_FMT.format(
-                    full_name=user.full_name if user else "-",
-                    username=f"@{user.username}" if user and user.username else "-",
-                    user_id=uid,
-                    amount=payment.total_amount,
-                    days=config.STARS_SUBSCRIPTION_DAYS,
-                    limit=config.PREMIUM_DAILY_LIMIT,
-                ),
-            )
-        except Exception:
-            logger.exception("فشل إرسال إشعار المشترك الجديد للمطور")
+)
+router.include_router(create_start_router(reply_text_variable, build_start_keyboard))
+router.include_router(create_payment_router(reply_text_variable))
