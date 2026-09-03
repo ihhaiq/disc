@@ -12,8 +12,9 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.exceptions import TelegramRetryAfter
 
 import config
-from handlers import router, load_custom_texts_into_memory, start_cleanup_task
+from handlers import router, start_cleanup_task
 from help_builder import router as help_router
+from services.localization import load_custom_texts_into_memory
 from texts import LOG_BOT_RUNNING, LOG_USING_LOCAL_BOT_API, LOG_TEMP_CLEANUP_STARTUP_FMT
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,8 @@ async def main():
     start_cleanup_task()
 
     await _run_with_flood_retry(
-        lambda: bot.delete_webhook(drop_pending_updates=True), "حذف الـ webhook",
+        lambda: bot.delete_webhook(drop_pending_updates=True),
+        "حذف الـ webhook",
     )
     await _run_with_flood_retry(bot.get_me, "جلب معلومات البوت (get_me)")
 
