@@ -320,6 +320,41 @@ async def notify_missing_channel_permission(
 
 channel_reply_index: dict[tuple[int, int], str] = {}
 
+
+async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
+    """
+    أرسل رسالة مع دعم كامل للإيموجي البريميوم والـ HTML.
+
+    يتولى تلقائياً:
+    - استخراج أكواد الإيموجي البريميوم
+    - تحويل HTML غير المدعوم
+    - بناء entities صحيحة
+    """
+    text = sanitize_and_convert_text(text)
+
+    emojis_dict = extract_premium_emojis(text)
+
+    if emojis_dict:
+        clean_text = clean_premium_emoji_tags(text)
+        entities = build_premium_entities_from_text(text)
+        try:
+            if entities:
+                return await message.reply(clean_text, entities=entities, **kwargs)
+            return await message.reply(clean_text, **kwargs)
+        except TelegramBadRequest as e:
+            logger.warning(f"فشل إرسال رسالة مع إيموجي بريميوم: {e}, سيتم الإرسال بدونها")
+            return await message.reply(clean_text, **kwargs)
+
+    try:
+        return await message.reply(text, **kwargs)
+    except TelegramBadRequest as e:
+        if "can't parse entities" in str(e).lower():
+            logger.warning("فشل تفسير HTML، سيُرسل كنص خام: %s", e)
+            clean_kwargs = {k: v for k, v in kwargs.items() if k != "entities"}
+            return await message.reply(html.escape(text), **clean_kwargs)
+        raise
+
+
 STATUS_EMOJI_ID = "5463010113440717314"
 STATUS_EMOJI_CHAR = "👀"
 
@@ -362,15 +397,12 @@ def render_rich_status_html(
 
     stage_icons = stage_icons or [STATUS_EMOJI_CHAR]
     emoji_html = f'<tg-emoji emoji-id="{STATUS_EMOJI_ID}">{STATUS_EMOJI_CHAR}</tg-emoji>'
-
     percent = 0.0 if percent is None else max(0.0, min(100.0, percent))
 
     row_parts = []
     for _ in stage_icons[:-1]:
         row_parts.append(f"<mark>{emoji_html}</mark>")
-
     row_parts.append(f"<mark>{emoji_html}</mark> {int(percent)}%")
-
     icons_row = " ".join(row_parts)
 
     eta_row = ""
@@ -822,7 +854,6 @@ def get_developer_hole_ratio(vinyl_choice: str | None) -> float:
 
 
 VINYL_COLOR_CHOICES: list[tuple[str, str]] = [(style.key, style.text_key) for style in VINYL_STYLES]
-
 VALID_VINYL_COLOR_VALUES: frozenset[str] = frozenset(value for value, _ in VINYL_COLOR_CHOICES)
 
 
@@ -839,10 +870,7 @@ def user_has_premium_access(user_id: int) -> bool:
 
 
 def _customize_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    return keyboards.build_customize_keyboard(
-        user_id,
-        get_user_rotation_seconds(user_id),
-    )
+    return keyboards.build_customize_keyboard(user_id, get_user_rotation_seconds(user_id))
 
 
 def _vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
@@ -1096,10 +1124,7 @@ async def on_customize_open(callback, bot: Bot):
         if get_user_lang(user_id) == "en"
         else "⚙️ تخصيص إعدادات القرص:"
     )
-    await callback.message.edit_text(
-        text,
-        reply_markup=_customize_keyboard(user_id),
-    )
+    await callback.message.edit_text(text, reply_markup=_customize_keyboard(user_id))
     await callback.answer()
 
 
