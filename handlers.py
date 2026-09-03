@@ -11,12 +11,12 @@ from aiogram.types import (
     Message,
     FSInputFile,
     InlineKeyboardMarkup,
-    InlineKeyboardButton,
     MessageEntity,
     InputRichMessage,
 )
 
 from compose import build_disc
+import keyboard as keyboards
 from processor import get_duration, render_vinyl, render_preview
 import config
 import limits
@@ -28,7 +28,6 @@ from services.contexts import is_channel_context as _is_channel_context
 from services.contexts import is_group_context as _is_group_context
 from services.contexts import is_shared_context as _is_shared_context
 from services.contexts import split_context_suffix as _split_channel_suffix
-from services.contexts import with_context_suffix as _with_channel_suffix
 from services.localization import get_user_lang, tr
 from services.messaging import (
     edit_text_variable,
@@ -320,58 +319,6 @@ async def notify_missing_channel_permission(
 
 
 channel_reply_index: dict[tuple[int, int], str] = {}
-
-CHANNEL_RESULT_URL = "http://t.me/discbybot?start=help"
-CHANNEL_RESULT_EMOJI = "💌"
-
-VINYL_TEMPLATE_PREVIEW_URL = "https://t.me/VinylTemplate"
-PREVIEW_EMOJI_ID = "5904219717073114606"
-
-
-PREMIUM_EMOJI_IDS = {
-    "emerald": "5285265490350972397",
-    "koi": "5339487433828353468",
-    "kiss": "5474525960143385880",
-    "ali": "5460737770798489825",
-    "black": "5399878127163811970",
-}
-
-
-async def reply_with_premium_emoji(message: Message, text: str, **kwargs) -> Message:
-    """
-    أرسل رسالة مع دعم كامل للإيموجي البريميوم والـ HTML.
-
-    يتولى تلقائياً:
-    - استخراج أكواد الإيموجي البريميوم
-    - تحويل HTML غير المدعوم
-    - بناء entities صحيحة
-    """
-    text = sanitize_and_convert_text(text)
-
-    emojis_dict = extract_premium_emojis(text)
-
-    if emojis_dict:
-        clean_text = clean_premium_emoji_tags(text)
-
-        entities = build_premium_entities_from_text(text)
-
-        try:
-            if entities:
-                return await message.reply(clean_text, entities=entities, **kwargs)
-            return await message.reply(clean_text, **kwargs)
-        except TelegramBadRequest as e:
-            logger.warning(f"فشل إرسال رسالة مع إيموجي بريميوم: {e}, سيتم الإرسال بدونها")
-            return await message.reply(clean_text, **kwargs)
-
-    try:
-        return await message.reply(text, **kwargs)
-    except TelegramBadRequest as e:
-        if "can't parse entities" in str(e).lower():
-            logger.warning("فشل تفسير HTML، سيُرسل كنص خام: %s", e)
-            clean_kwargs = {k: v for k, v in kwargs.items() if k != "entities"}
-            return await message.reply(html.escape(text), **clean_kwargs)
-        raise
-
 
 STATUS_EMOJI_ID = "5463010113440717314"
 STATUS_EMOJI_CHAR = "👀"
@@ -891,21 +838,36 @@ def user_has_premium_access(user_id: int) -> bool:
     return limits.is_premium(user_id)
 
 
+def _customize_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return keyboards.build_customize_keyboard(
+        user_id,
+        get_user_rotation_seconds(user_id),
+    )
+
+
+def _vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
+    return keyboards.build_vinyl_color_keyboard(
+        user_id,
+        current_choice=developer_vinyl_choice.get(user_id),
+        has_premium=user_has_premium_access(user_id),
+    )
+
+
+def _wiz_color_keyboard(
+    user_id: int = 0,
+    channel_chat_id: int | None = None,
+    channel_message_id: int | None = None,
+) -> InlineKeyboardMarkup:
+    return keyboards.build_wiz_color_keyboard(
+        user_id,
+        channel_chat_id,
+        channel_message_id,
+        has_premium=user_has_premium_access(user_id),
+    )
+
+
 def get_job_priority(user_id: int) -> int:
     return 0 if user_id and user_id == config.DEVELOPER_ID else 1
-
-
-def build_buy_stars_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_BUY_STARS", user_id).format(price=config.STARS_SUBSCRIPTION_PRICE),
-                    callback_data="buy_stars",
-                )
-            ],
-        ]
-    )
 
 
 def enqueue_job(job: dict) -> None:
@@ -1037,19 +999,11 @@ async def process_job(bot: Bot, job: dict) -> None:
         animator.set_stage(tr("STAGE_UPLOADING_VIDEO", uid), percent=100)
         await bot.send_chat_action(message.chat.id, action=ChatAction.UPLOAD_VIDEO_NOTE)
 
-        final_keyboard = None
-        if _is_shared_context(context_key):
-            final_keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=f"{CHANNEL_RESULT_EMOJI} كيف اسوي وحدة مثل هذي؟",
-                            url=CHANNEL_RESULT_URL,
-                            style="danger",
-                        )
-                    ]
-                ]
-            )
+        final_keyboard = (
+            keyboards.build_channel_result_keyboard()
+            if _is_shared_context(context_key)
+            else None
+        )
 
         try:
             await message.reply_video_note(
@@ -1134,187 +1088,6 @@ async def process_job(bot: Bot, job: dict) -> None:
                 pass
 
 
-def build_customize_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """قائمة التخصيص التي تُفتح من زر (تخصيص) في رسالة الترحيب."""
-    current = get_user_rotation_seconds(user_id)
-    labels = [
-        (tr("SPEED_LABEL_FULL", user_id), "full"),
-        (tr("SPEED_LABEL_8RPM", user_id), "8"),
-        (tr("SPEED_LABEL_19RPM", user_id), "19"),
-        (tr("SPEED_LABEL_33RPM", user_id), "33"),
-        (tr("SPEED_LABEL_45RPM", user_id), "45"),
-    ]
-    buttons = []
-    for label, value in labels:
-        selected = current in (None, 0) if value == "full" else current == (60 / float(value))
-        mark = " ✅" if selected else ""
-        buttons.append(
-            InlineKeyboardButton(
-                text=f"{label}{mark}",
-                callback_data=f"speed:{value}",
-                style="primary",
-            )
-        )
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            buttons[:2],
-            buttons[2:4],
-            buttons[4:6],
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_VINYL_COLOR_MENU", user_id),
-                    callback_data="vinyl_menu:open",
-                    style="danger",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_BACK", user_id),
-                    callback_data="customize:back",
-                    style="primary",
-                )
-            ],
-        ]
-    )
-
-
-def build_start_keyboard(user_id: int, bot_username: str) -> InlineKeyboardMarkup:
-    """لوحة الترحيب: إضافة البوت، اللغة، والتخصيص."""
-    add_url = f"https://t.me/{bot_username}?startgroup=start"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="➕ أضفني للمجموعة",
-                    url=add_url,
-                    style="primary",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=texts_module.BTN_LANG,
-                    callback_data="lang:toggle",
-                    style="success",
-                ),
-                InlineKeyboardButton(
-                    text=tr("BTN_CUSTOMIZE", user_id),
-                    callback_data="customize:open",
-                    style="danger",
-                ),
-            ],
-        ]
-    )
-
-
-def build_vinyl_color_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
-    current = developer_vinyl_choice.get(user_id)
-    has_premium = user_has_premium_access(user_id)
-
-    def label(var_name: str, value: str) -> str:
-        text = tr(var_name, user_id)
-        is_selected = current == value or (current is None and value == "default")
-        if limits.is_premium_color(value) and not has_premium:
-            text = f"🔒 {text}"
-        return f"{text} ✅" if is_selected else text
-
-    def btn_style(value: str) -> str:
-        is_selected = current == value or (current is None and value == "default")
-        return "success" if is_selected else "default"
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_BLACK", "default"),
-                    callback_data="vinyl:default",
-                    style=btn_style("default"),
-                    icon_custom_emoji_id=PREMIUM_EMOJI_IDS["black"],
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_PINK", "pink"),
-                    callback_data="vinyl:pink",
-                    style=btn_style("pink"),
-                ),
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_BLUE", "blue"),
-                    callback_data="vinyl:blue",
-                    style=btn_style("blue"),
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_YELLOW", "yellow"),
-                    callback_data="vinyl:yellow",
-                    style=btn_style("yellow"),
-                ),
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_RED", "red"),
-                    callback_data="vinyl:red",
-                    style=btn_style("red"),
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_GREEN", "green"),
-                    callback_data="vinyl:green",
-                    style=btn_style("green"),
-                ),
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_BLOODY", "bloody"),
-                    callback_data="vinyl:bloody",
-                    style=btn_style("bloody"),
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_ROSE", "rose"),
-                    callback_data="vinyl:rose",
-                    style=btn_style("rose"),
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_EMERALD", "Emerald"),
-                    callback_data="vinyl:emerald",
-                    style="primary",
-                    icon_custom_emoji_id=PREMIUM_EMOJI_IDS["emerald"],
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_KOI", "koi"),
-                    callback_data="vinyl:koi",
-                    style=btn_style("koi"),
-                    icon_custom_emoji_id=PREMIUM_EMOJI_IDS["koi"],
-                ),
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_KISS", "kiss"),
-                    callback_data="vinyl:kiss",
-                    style=btn_style("kiss"),
-                    icon_custom_emoji_id=PREMIUM_EMOJI_IDS["kiss"],
-                ),
-                InlineKeyboardButton(
-                    text=label("BTN_VINYL_ALI", "ali"),
-                    callback_data="vinyl:ali",
-                    style=btn_style("ali"),
-                    icon_custom_emoji_id=PREMIUM_EMOJI_IDS["ali"],
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_VINYL_COLOR_PREVIEW", user_id),
-                    url=VINYL_TEMPLATE_PREVIEW_URL,
-                    icon_custom_emoji_id=PREVIEW_EMOJI_ID,
-                )
-            ],
-            [InlineKeyboardButton(text=tr("BTN_BACK", user_id), callback_data="vinyl_menu:back")],
-        ]
-    )
-
-
 @router.callback_query(F.data == "customize:open")
 async def on_customize_open(callback, bot: Bot):
     user_id = callback.from_user.id if callback.from_user else 0
@@ -1325,7 +1098,7 @@ async def on_customize_open(callback, bot: Bot):
     )
     await callback.message.edit_text(
         text,
-        reply_markup=build_customize_keyboard(user_id),
+        reply_markup=_customize_keyboard(user_id),
     )
     await callback.answer()
 
@@ -1339,7 +1112,7 @@ async def on_customize_back(callback, bot: Bot):
         bot,
         "MSG_START_HELP",
         user_id,
-        reply_markup=build_start_keyboard(user_id, me.username),
+        reply_markup=keyboards.build_start_keyboard(user_id, me.username),
     )
     await callback.answer()
 
@@ -1352,7 +1125,7 @@ async def on_vinyl_menu_open(callback, bot: Bot):
         await callback.message.answer_photo(
             developer_menu_image_file_id,
             caption=tr("MSG_VINYL_COLOR_INFO", user_id),
-            reply_markup=build_vinyl_color_keyboard(user_id),
+            reply_markup=_vinyl_color_keyboard(user_id),
         )
     elif developer_menu_image_file_id:
         await callback.message.delete()
@@ -1361,7 +1134,7 @@ async def on_vinyl_menu_open(callback, bot: Bot):
             callback.message.chat.id,
             "MSG_VINYL_COLOR_INFO",
             user_id,
-            reply_markup=build_vinyl_color_keyboard(user_id),
+            reply_markup=_vinyl_color_keyboard(user_id),
         )
     else:
         await edit_text_variable(
@@ -1369,7 +1142,7 @@ async def on_vinyl_menu_open(callback, bot: Bot):
             bot,
             "MSG_VINYL_COLOR_INFO",
             user_id,
-            reply_markup=build_vinyl_color_keyboard(user_id),
+            reply_markup=_vinyl_color_keyboard(user_id),
         )
     await callback.answer()
 
@@ -1384,11 +1157,11 @@ async def on_vinyl_menu_back(callback, bot: Bot):
             callback.message.chat.id,
             "MSG_START_HELP",
             user_id,
-            reply_markup=build_customize_keyboard(user_id),
+            reply_markup=_customize_keyboard(user_id),
         )
     else:
         await callback.message.edit_text(
-            "⚙️ تخصيص إعدادات القرص:", reply_markup=build_customize_keyboard(user_id)
+            "⚙️ تخصيص إعدادات القرص:", reply_markup=_customize_keyboard(user_id)
         )
     await callback.answer()
 
@@ -1414,27 +1187,10 @@ async def on_channel_audio(message: Message, bot: Bot):
     }
     wizard_state.pop(key, None)
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_QUICK_CREATE", key),
-                    callback_data=_with_channel_suffix("mode:quick", chat_id, message.message_id),
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_CUSTOMIZE", key),
-                    callback_data=_with_channel_suffix("mode:custom", chat_id, message.message_id),
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_CANCEL", key),
-                    callback_data=_with_channel_suffix("cancel_queue", chat_id, message.message_id),
-                )
-            ],
-        ]
+    keyboard = keyboards.build_mode_keyboard(
+        key,
+        chat_id=chat_id,
+        message_id=message.message_id,
     )
 
     try:
@@ -1492,45 +1248,12 @@ async def on_audio(message: Message, bot: Bot):
     wizard_state.pop(uid, None)
     pending_images.pop(uid, None)
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_QUICK_CREATE", owner_id), callback_data="mode:quick"
-                )
-            ],
-            [InlineKeyboardButton(text=tr("BTN_CUSTOMIZE", owner_id), callback_data="mode:custom")],
-            [InlineKeyboardButton(text=tr("BTN_CANCEL", owner_id), callback_data="cancel_queue")],
-        ]
-    )
+    keyboard = keyboards.build_mode_keyboard(owner_id)
     if is_group:
-        group_keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text=tr("BTN_QUICK_CREATE", owner_id),
-                        callback_data=_with_channel_suffix(
-                            "mode:quick", message.chat.id, message.message_id
-                        ),
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text=tr("BTN_CUSTOMIZE", owner_id),
-                        callback_data=_with_channel_suffix(
-                            "mode:custom", message.chat.id, message.message_id
-                        ),
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text=tr("BTN_CANCEL", owner_id),
-                        callback_data=_with_channel_suffix(
-                            "cancel_queue", message.chat.id, message.message_id
-                        ),
-                    )
-                ],
-            ]
+        group_keyboard = keyboards.build_mode_keyboard(
+            owner_id,
+            chat_id=message.chat.id,
+            message_id=message.message_id,
         )
         sent = await send_ephemeral_text(
             bot,
@@ -1574,7 +1297,7 @@ async def _send_limit_reached(
             message.chat.id,
             owner_id,
             limit_text,
-            reply_markup=build_buy_stars_keyboard(owner_id),
+            reply_markup=keyboards.build_buy_stars_keyboard(owner_id),
         )
         return
     await reply_text_variable(
@@ -1582,7 +1305,7 @@ async def _send_limit_reached(
         bot,
         "MSG_LIMIT_REACHED_FMT",
         owner_id,
-        reply_markup=build_buy_stars_keyboard(owner_id),
+        reply_markup=keyboards.build_buy_stars_keyboard(owner_id),
         **format_kwargs,
     )
 
@@ -1674,7 +1397,7 @@ async def on_mode_custom(callback, bot: Bot):
         uid,
         callback.message,
         tr("MSG_WIZ_CHOOSE_COLOR", uid),
-        reply_markup=build_wiz_color_keyboard(uid, ch_chat, ch_msg),
+        reply_markup=_wiz_color_keyboard(uid, ch_chat, ch_msg),
     )
     await callback.answer()
 
@@ -1696,198 +1419,6 @@ def _channel_ctx(uid) -> tuple[int | None, int | None]:
         return None, None
 
 
-def build_wiz_color_keyboard(
-    user_id: int = 0, channel_chat_id: int | None = None, channel_message_id: int | None = None
-) -> InlineKeyboardMarkup:
-
-    def cb(data: str) -> str:
-        return _with_channel_suffix(data, channel_chat_id, channel_message_id)
-
-    has_premium = user_has_premium_access(user_id)
-
-    def wiz_label(var_name: str, value: str) -> str:
-        text = tr(var_name, user_id)
-        if limits.is_premium_color(value) and not has_premium:
-            return f"🔒 {text}"
-        return text
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_BLACK", "default"),
-                    callback_data=cb("wiz_color:default"),
-                    style="primary",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_PINK", "pink"),
-                    callback_data=cb("wiz_color:pink"),
-                    style="primary",
-                ),
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_BLUE", "blue"),
-                    callback_data=cb("wiz_color:blue"),
-                    style="primary",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_YELLOW", "yellow"),
-                    callback_data=cb("wiz_color:yellow"),
-                    style="primary",
-                ),
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_RED", "red"),
-                    callback_data=cb("wiz_color:red"),
-                    style="primary",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_GREEN", "green"),
-                    callback_data=cb("wiz_color:green"),
-                    style="primary",
-                ),
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_BLOODY", "bloody"),
-                    callback_data=cb("wiz_color:bloody"),
-                    style="primary",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_EMERALD", "emerald"),
-                    callback_data=cb("wiz_color:emerald"),
-                    style="primary",
-                    icon_custom_emoji_id=PREMIUM_EMOJI_IDS["emerald"],
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_ROSE", "rose"),
-                    callback_data=cb("wiz_color:rose"),
-                    style="primary",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_KOI", "koi"),
-                    callback_data=cb("wiz_color:koi"),
-                    style="primary",
-                    icon_custom_emoji_id=PREMIUM_EMOJI_IDS["koi"],
-                ),
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_KISS", "kiss"),
-                    callback_data=cb("wiz_color:kiss"),
-                    style="primary",
-                    icon_custom_emoji_id=PREMIUM_EMOJI_IDS["kiss"],
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=wiz_label("BTN_VINYL_ALI", "ali"),
-                    callback_data=cb("wiz_color:ali"),
-                    style="primary",
-                    icon_custom_emoji_id=PREMIUM_EMOJI_IDS["ali"],
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_VINYL_COLOR_PREVIEW", user_id),
-                    url=VINYL_TEMPLATE_PREVIEW_URL,
-                    icon_custom_emoji_id=PREVIEW_EMOJI_ID,
-                )
-            ],
-        ]
-    )
-
-
-def build_wiz_speed_keyboard(
-    user_id: int = 0, channel_chat_id: int | None = None, channel_message_id: int | None = None
-) -> InlineKeyboardMarkup:
-    labels = [
-        (tr("SPEED_LABEL_FULL", user_id), "full"),
-        (tr("SPEED_LABEL_8RPM", user_id), "8"),
-        (tr("SPEED_LABEL_19RPM", user_id), "19"),
-        (tr("SPEED_LABEL_33RPM", user_id), "33"),
-        (tr("SPEED_LABEL_45RPM", user_id), "45"),
-    ]
-    buttons = [
-        InlineKeyboardButton(
-            text=label,
-            callback_data=_with_channel_suffix(
-                f"wiz_speed:{value}", channel_chat_id, channel_message_id
-            ),
-        )
-        for label, value in labels
-    ]
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            buttons[:2],
-            buttons[2:4],
-            buttons[4:6],
-        ]
-    )
-
-
-def build_wiz_image_keyboard(
-    has_thumbnail: bool,
-    user_id: int = 0,
-    channel_chat_id: int | None = None,
-    channel_message_id: int | None = None,
-) -> InlineKeyboardMarkup:
-    rows = []
-    if has_thumbnail:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_WIZ_SKIP_IMAGE", user_id),
-                    callback_data=_with_channel_suffix(
-                        "wiz_image:skip", channel_chat_id, channel_message_id
-                    ),
-                )
-            ]
-        )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text=tr("BTN_CANCEL", user_id),
-                callback_data=_with_channel_suffix(
-                    "cancel_queue", channel_chat_id, channel_message_id
-                ),
-            )
-        ]
-    )
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def build_wiz_segment_keyboard(
-    total_duration: float,
-    user_id: int = 0,
-    channel_chat_id: int | None = None,
-    channel_message_id: int | None = None,
-) -> InlineKeyboardMarkup:
-    minutes_count = max(1, math.ceil(total_duration / 60))
-    buttons = []
-    for i in range(minutes_count):
-        start = i * 60
-        if start >= total_duration:
-            break
-        buttons.append(
-            InlineKeyboardButton(
-                text=tr("BTN_WIZ_SEGMENT_FMT", user_id).format(n=i + 1),
-                callback_data=_with_channel_suffix(
-                    f"wiz_segment:{start}", channel_chat_id, channel_message_id
-                ),
-                style="success",
-            )
-        )
-    rows = [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 @router.callback_query(F.data.startswith("wiz_color:"))
 async def on_wiz_color(callback, bot: Bot):
     resolved = await resolve_callback_uid(callback, bot)
@@ -1905,7 +1436,7 @@ async def on_wiz_color(callback, bot: Bot):
             await callback.answer(tr("MSG_COLOR_PREMIUM_ONLY", presser_id), show_alert=True)
             await callback.message.reply(
                 tr("MSG_COLOR_PREMIUM_ONLY", presser_id),
-                reply_markup=build_buy_stars_keyboard(presser_id),
+                reply_markup=keyboards.build_buy_stars_keyboard(presser_id),
             )
             return
         if choice == "default":
@@ -1921,7 +1452,7 @@ async def on_wiz_color(callback, bot: Bot):
         uid,
         callback.message,
         tr("MSG_WIZ_CHOOSE_SPEED", uid),
-        reply_markup=build_wiz_speed_keyboard(uid, ch_chat, ch_msg),
+        reply_markup=keyboards.build_wiz_speed_keyboard(uid, ch_chat, ch_msg),
     )
     await callback.answer()
 
@@ -1954,7 +1485,7 @@ async def on_wiz_speed(callback, bot: Bot):
         uid,
         callback.message,
         image_text,
-        reply_markup=build_wiz_image_keyboard(has_thumb, uid, ch_chat, ch_msg),
+        reply_markup=keyboards.build_wiz_image_keyboard(has_thumb, uid, ch_chat, ch_msg),
     )
     await callback.answer()
 
@@ -1998,7 +1529,7 @@ async def _wiz_advance_to_segment_or_finish(
     ch_chat, ch_msg = _channel_ctx(uid)
     sent = await send_func(
         tr("MSG_WIZ_CHOOSE_SEGMENT", uid),
-        reply_markup=build_wiz_segment_keyboard(total_duration, uid, ch_chat, ch_msg),
+        reply_markup=keyboards.build_wiz_segment_keyboard(total_duration, uid, ch_chat, ch_msg),
     )
     if (
         _is_shared_context(uid)
@@ -2063,31 +1594,11 @@ async def _finish_wizard(bot: Bot, uid, send_func, segment_start: float) -> None
     pending_confirm[owner_id] = job
     await send_func(
         tr("MSG_WIZ_REVIEW", owner_id),
-        reply_markup=build_wiz_confirm_keyboard(owner_id),
+        reply_markup=keyboards.build_wiz_confirm_keyboard(owner_id),
     )
 
 
 pending_confirm: dict[int, dict] = {}
-
-
-def build_wiz_confirm_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_WIZ_PREVIEW", user_id), callback_data="wiz_preview_confirm"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=tr("BTN_WIZ_CONFIRM_FULL", user_id),
-                    callback_data="wiz_full_confirm",
-                    style="success",
-                )
-            ],
-            [InlineKeyboardButton(text=tr("BTN_CANCEL", user_id), callback_data="cancel_queue")],
-        ]
-    )
 
 
 async def _run_quick_preview(bot: Bot, target_message: Message, uid: int, job: dict) -> None:
@@ -2144,7 +1655,7 @@ async def _run_quick_preview(bot: Bot, target_message: Message, uid: int, job: d
         await target_message.reply_video(
             FSInputFile(preview_out_path),
             caption=tr("MSG_PREVIEW_READY_CAPTION", uid),
-            reply_markup=build_wiz_confirm_keyboard(uid),
+            reply_markup=keyboards.build_wiz_confirm_keyboard(uid),
         )
     except Exception:
         logger.exception("فشل توليد المعاينة السريعة")
@@ -2367,7 +1878,7 @@ async def on_vinyl_choice(callback, bot: Bot):
             await callback.answer(tr("MSG_COLOR_PREMIUM_ONLY", user_id), show_alert=True)
             await callback.message.reply(
                 tr("MSG_COLOR_PREMIUM_ONLY", user_id),
-                reply_markup=build_buy_stars_keyboard(user_id),
+                reply_markup=keyboards.build_buy_stars_keyboard(user_id),
             )
             return
         if choice == "default":
@@ -2376,7 +1887,7 @@ async def on_vinyl_choice(callback, bot: Bot):
             developer_vinyl_choice[user_id] = choice
     else:
         developer_vinyl_choice.pop(user_id, None)
-    await callback.message.edit_reply_markup(reply_markup=build_vinyl_color_keyboard(user_id))
+    await callback.message.edit_reply_markup(reply_markup=_vinyl_color_keyboard(user_id))
     await callback.answer(tr("MSG_VINYL_CHOICE_SAVED_ANSWER", user_id))
 
 
@@ -2388,7 +1899,7 @@ async def on_speed_selected(callback, bot: Bot):
         user_rotation_seconds[user_id] = 0.0
     else:
         user_rotation_seconds[user_id] = 60 / float(data)
-    await callback.message.edit_reply_markup(reply_markup=build_customize_keyboard(user_id))
+    await callback.message.edit_reply_markup(reply_markup=_customize_keyboard(user_id))
     await callback.answer(tr("MSG_SPEED_SAVED_ANSWER", user_id))
 
 
@@ -2397,10 +1908,12 @@ router.include_router(developer_text_router)
 router.include_router(
     create_language_router(
         edit_text_variable,
-        build_vinyl_color_keyboard,
-        build_customize_keyboard,
-        build_start_keyboard,
+        _vinyl_color_keyboard,
+        _customize_keyboard,
+        keyboards.build_start_keyboard,
     )
 )
-router.include_router(create_start_router(reply_text_variable, build_start_keyboard))
+router.include_router(
+    create_start_router(reply_text_variable, keyboards.build_start_keyboard)
+)
 router.include_router(create_payment_router(reply_text_variable))
