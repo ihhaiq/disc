@@ -52,6 +52,7 @@ vinylbot/
 ├── limits.py        # حدود الاستخدام والاشتراكات
 ├── texts.py         # النصوص العربية وتنظيف HTML
 ├── locales/         # الترجمات المنفصلة
+├── services/        # سياسات السياق واللغة والتحقق من الدفع
 ├── storage/         # تخزين JSON ذري ومشترك
 ├── rich_content.py  # استخراج وتطبيع الرسائل الغنية
 ├── vinyl_catalog.py # كتالوج القوالب ومساراتها
@@ -115,6 +116,7 @@ vinylbot/
 ├── limits.py # Usage limits and subscriptions
 ├── texts.py # Arabic source strings and HTML cleanup
 ├── locales/ # Separate translations
+├── services/ # Context, localization, and payment policies
 ├── storage/ # Shared atomic JSON persistence
 ├── rich_content.py # Rich-message normalization
 ├── vinyl_catalog.py # Vinyl template catalog

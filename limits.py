@@ -15,6 +15,7 @@ _store = JsonStore(_USAGE_FILE, indent=None)
 DAY_SECONDS = 24 * 60 * 60
 
 _data: dict[str, dict] = _store.read()
+_reserved_counts: dict[int, int] = {}
 
 _WHITELIST_KEY = "_whitelist"
 
@@ -58,7 +59,8 @@ def get_count(uid: int) -> int:
 
 def can_create(uid: int) -> bool:
     with _lock:
-        return is_whitelisted(uid) or get_count(uid) < get_daily_limit(uid)
+        used_and_reserved = get_count(uid) + _reserved_counts.get(uid, 0)
+        return is_whitelisted(uid) or used_and_reserved < get_daily_limit(uid)
 
 
 def get_reset_seconds(uid: int) -> float:
@@ -69,23 +71,43 @@ def get_reset_seconds(uid: int) -> float:
         return max(0.0, remaining)
 
 
-def record_usage(uid: int) -> None:
-    with _lock:
-        e = _reset_if_needed(uid)
-        e["count"] = e.get("count", 0) + 1
-        _save()
-
-
-def try_record_usage(uid: int) -> bool:
-    """Atomically reserve one daily use when the user still has capacity."""
+def reserve_usage(uid: int) -> bool:
+    """Reserve capacity for an accepted job without charging failed work."""
     with _lock:
         if is_whitelisted(uid):
             return True
-        e = _reset_if_needed(uid)
-        if e.get("count", 0) >= get_daily_limit(uid):
+        if not can_create(uid):
             return False
+        _reserved_counts[uid] = _reserved_counts.get(uid, 0) + 1
+        return True
+
+
+def commit_reserved_usage(uid: int) -> bool:
+    """Convert one live reservation into a persisted successful use."""
+    with _lock:
+        reserved = _reserved_counts.get(uid, 0)
+        if reserved <= 0:
+            return False
+        if reserved == 1:
+            _reserved_counts.pop(uid, None)
+        else:
+            _reserved_counts[uid] = reserved - 1
+        e = _reset_if_needed(uid)
         e["count"] = e.get("count", 0) + 1
         _save()
+        return True
+
+
+def release_reserved_usage(uid: int) -> bool:
+    """Release one reservation after cancellation or failed processing."""
+    with _lock:
+        reserved = _reserved_counts.get(uid, 0)
+        if reserved <= 0:
+            return False
+        if reserved == 1:
+            _reserved_counts.pop(uid, None)
+        else:
+            _reserved_counts[uid] = reserved - 1
         return True
 
 

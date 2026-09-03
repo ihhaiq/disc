@@ -23,6 +23,16 @@ import texts as texts_module
 from texts import clean_html
 import custom_texts
 import math
+from services.contexts import channel_key as _channel_key
+from services.contexts import group_key as _group_key
+from services.contexts import is_channel_context as _is_channel_context
+from services.contexts import is_group_context as _is_group_context
+from services.contexts import is_shared_context as _is_shared_context
+from services.contexts import split_context_suffix as _split_channel_suffix
+from services.contexts import with_context_suffix as _with_channel_suffix
+from services.localization import get_user_lang, load_custom_texts_into_memory, tr, user_language
+from services.payments import build_subscription_payload, validate_subscription_payment
+from vinyl_catalog import VINYL_STYLES, get_vinyl_style
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -143,32 +153,6 @@ async def _edit_wizard_text(
     )
 
 
-# ============================================================
-# تحميل النصوص المخصصة عند البدء
-# ============================================================
-def load_custom_texts_into_memory() -> None:
-    """
-    تحميل جميع النصوص المخصصة من custom_texts.json إلى الذاكرة.
-    يتم استدعاء هذه الدالة مرة واحدة عند بدء البوت.
-    """
-    custom_list = custom_texts.list_custom()
-    if custom_list:
-        logger.info(f"📝 تم تحميل {len(custom_list)} نص مخصص من JSON الدائم")
-        for var_name, entry in custom_list.items():
-            value = entry.get("value", "")
-            if var_name.startswith("EN::"):
-                en_key = var_name[len("EN::"):]
-                texts_module.TEXTS_EN[en_key] = value
-            else:
-                setattr(texts_module, var_name, value)
-            editor_name = entry.get("editor_name", "Unknown")
-            updated_at = entry.get("updated_at", 0)
-            import datetime
-            time_str = datetime.datetime.fromtimestamp(updated_at).strftime("%Y-%m-%d %H:%M:%S") if updated_at else "?"
-            logger.info(f"  • {var_name} (محرّر: {editor_name}, آخر تعديل: {time_str})")
-    else:
-        logger.info("ℹ️ لا توجد نصوص مخصصة محفوظة حالياً")
-
 job_queue: asyncio.Queue[dict] = asyncio.Queue()
 developer_job_queue: asyncio.Queue[dict] = asyncio.Queue()
 # عدة workers شغّالين بالتوازي (بعدد config.MAX_CONCURRENT_JOBS) بدل واحد فقط
@@ -180,7 +164,6 @@ queue_order: list[str] = []
 pending_images: dict[int, dict] = {}
 pending_audio: dict[int, dict] = {}
 user_rotation_seconds: dict[int, float | None] = {}
-user_language: dict[int, str] = {}  # "ar" (افتراضي) أو "en"
 user_pending_jobs: dict[int, set[str]] = {}
 tracked_jobs: dict[str, dict] = {}
 canceled_job_ids: set[str] = set()
@@ -226,61 +209,6 @@ def compute_job_timeout_seconds(audio_file_size_bytes: int | None) -> float:
 # (chat_id + message_id الملف الصوتي الأصلي)، فما فيه أي تصادم ممكن مع uid حقيقي
 # int، وبنفس الوقت نعيد استخدام كل الدوال الموجودة (tr, build_wiz_*, get_developer_*)
 # بدون أي تكرار كود — هذا هو سبب "التماسك" المطلوب.
-CHANNEL_KEY_PREFIX = "c"
-
-# نفس فكرة القنوات بالضبط، لكن للمجموعات/السوبرگروبات: مفتاح مركّب فريد
-# (chat_id + message_id) بدل uid حقيقي، عشان ما يصير تصادم لو نفس الشخص
-# عنده أكثر من طلب متزامن بمجموعات مختلفة أو بالخاص بنفس الوقت. الفرق
-# الوحيد عن القنوات: بالمجموعة "صاحب الصوت الأصلي" يقدر يتحكم بالأزرار
-# هو نفسه (مو بس الأدمن)، لأن بالمجموعة الشخص العادي هو اللي يرسل الصوت
-# (بعكس القناة اللي المنشور فيها منسوب للقناة نفسها مو لعضو معيّن).
-GROUP_KEY_PREFIX = "g"
-
-
-def _channel_key(chat_id: int, message_id: int) -> str:
-    return f"{CHANNEL_KEY_PREFIX}{chat_id}:{message_id}"
-
-
-def _group_key(chat_id: int, message_id: int) -> str:
-    return f"{GROUP_KEY_PREFIX}{chat_id}:{message_id}"
-
-
-def _is_channel_context(uid) -> bool:
-    return isinstance(uid, str) and uid.startswith(CHANNEL_KEY_PREFIX)
-
-
-def _is_group_context(uid) -> bool:
-    return isinstance(uid, str) and uid.startswith(GROUP_KEY_PREFIX)
-
-
-def _is_shared_context(uid) -> bool:
-    """سياق قناة أو مجموعة (بعكس محادثة خاصة عادية بمفتاح int)."""
-    return _is_channel_context(uid) or _is_group_context(uid)
-
-
-def _with_channel_suffix(callback_data: str, channel_chat_id: int | None, channel_message_id: int | None) -> str:
-    """يضيف لاحقة chat_id:message_id لأي callback_data لو الكيبورد يُبنى لسياق قناة."""
-    if channel_chat_id is None or channel_message_id is None:
-        return callback_data
-    return f"{callback_data}:{channel_chat_id}:{channel_message_id}"
-
-
-def _split_channel_suffix(data: str) -> tuple[str, int | None, int | None]:
-    """
-    يفحص آخر جزئين من callback_data: لو كلاهما أرقام صحيحة (والأول ممكن يبدأ
-    بإشارة سالبة، لأن آيدي القنوات بتليكرام سالب دايمًا)، يعتبرهم سياق قناة
-    (chat_id, message_id) ويرجع باقي النص بدونهم. غير هذا يرجع النص الأصلي
-    كامل بدون تغيير (سياق خاص عادي).
-    """
-    parts = data.split(":")
-    if len(parts) >= 3:
-        maybe_chat, maybe_msg = parts[-2], parts[-1]
-        if maybe_chat.lstrip("-").isdigit() and maybe_msg.isdigit():
-            base = ":".join(parts[:-2])
-            return base, int(maybe_chat), int(maybe_msg)
-    return data, None, None
-
-
 async def _is_channel_controller(bot: Bot, chat_id: int, user_id: int) -> bool:
     """يتحقق إن المستخدم أدمن أو مالك بالقناة (chat_id)."""
     if not user_id:
@@ -1304,6 +1232,7 @@ async def _job_worker_loop(bot: Bot) -> None:
         except Exception:
             logger.exception(texts_module.LOG_QUEUE_PROCESS_FAILED)
         finally:
+            _release_job_usage(job)
             tracked_jobs.pop(job_id, None)
             user_pending_jobs.get(job.get("uid", 0), set()).discard(job_id)
             if queue is not None:
@@ -1314,92 +1243,22 @@ def get_user_rotation_seconds(user_id: int) -> float | None:
     return user_rotation_seconds.get(user_id, config.ROTATION_SECONDS)
 
 
-# ============================================================
-# نظام اللغات (Language System)
-# ============================================================
-def get_user_lang(user_id: int) -> str:
-    """يرجّع لغة المستخدم الحالية: 'ar' أو 'en' (الافتراضي عربي)."""
-    return user_language.get(user_id, "ar")
-
-
-def tr(var_name: str, user_id: int) -> str:
-    """
-    يرجّع النص المترجم حسب لغة المستخدم.
-    - عربي (الافتراضي): من texts_module (يشمل أي تعديل مخصص من لوحة المطور)
-    - إنجليزي: من TEXTS_EN، ولو غير موجودة فيها يرجع للعربي تلقائيًا
-    """
-    if get_user_lang(user_id) == "en":
-        en_value = texts_module.TEXTS_EN.get(var_name)
-        if en_value is not None:
-            return en_value
-    return getattr(texts_module, var_name, "")
-
-
 def get_developer_vinyl_path(user_id: int, choice_override: str | None = None) -> str:
     choice = choice_override if choice_override is not None else developer_vinyl_choice.get(user_id)
-    if choice == "pink":
-        return config.VINYL_PINK_PATH
-    if choice == "yellow":
-        return config.VINYL_YELLOW_PATH
-    if choice == "blue":
-        return config.VINYL_BLUE_PATH
-    if choice == "red":
-        return config.VINYL_RED_PATH
-    if choice == "green":
-        return config.VINYL_GREEN_PATH
-    if choice == "bloody" :
-        return config.VINYL_BLOODY_PATH
-    if choice == "rose" :
-        return config.VINYL_ROSE_PATH
-    if choice == "emerald" :
-        return config.VINYL_EMERALD_PATH
-    if choice == "koi":
-        return config.VINYL_KOI_PATH
-    if choice == "kiss":
-        return config.VINYL_KISS_PATH
-    if choice == "ali":
-        return config.VINYL_ALI_PATH
-    return config.VINYL_PATH
+    return get_vinyl_style(choice).vinyl_path
 
 
 def get_developer_shadow_path(user_id: int, choice_override: str | None = None) -> str:
     choice = choice_override if choice_override is not None else developer_vinyl_choice.get(user_id)
-    if choice == "pink":
-        return config.SHADOW_PINK_PATH
-    if choice == "yellow":
-        return config.SHADOW_YELLOW_PATH
-    if choice == "blue":
-        return config.SHADOW_BLUE_PATH
-    if choice == "red":
-        return config.SHADOW_RED_PATH
-    if choice == "green":
-        return config.SHADOW_GREEN_PATH
-    if choice == "bloody":
-        return config.SHADOW_PINK_PATH
-    if choice == "rose" :
-        return config.SHADOW_ROSE_PATH
-    if choice == "emerald" :
-        return config.SHADOW_ROSE_PATH
-    if choice == "koi":
-        return config.SHADOW_ROSE_PATH
-    if choice == "kiss":
-        return config.SHADOW_ROSE_PATH
-    if choice == "ali":
-        return config.SHADOW_ROSE_PATH
-    return config.SHADOW_PATH
+    return get_vinyl_style(choice).shadow_path
 
 
 # نسبة قطر الثقب (hole_ratio) اللي تُمرَّر لـ build_disc قابلة للتخصيص لكل
 # لون على حدة، لأن بعض تصاميم القوالب (زي kiss) رسمتها للثقب أصغر بصريًا من
 # باقي الألوان، فنفس HOLE_RATIO العام يخلي الصورة تطلع أكبر من المطلوب عليه
 # تحديدًا. تعديل هذا القاموس لا يؤثر على أي لون ثاني.
-VINYL_HOLE_RATIO_OVERRIDES: dict[str, float] = {
-    "kiss": 0.39,
-}
-
-
 def get_developer_hole_ratio(vinyl_choice: str | None) -> float:
-    return VINYL_HOLE_RATIO_OVERRIDES.get(vinyl_choice, config.HOLE_RATIO)
+    return get_vinyl_style(vinyl_choice).hole_ratio_override or config.HOLE_RATIO
 
 
 # القائمة الكاملة لكل ألوان الأقراص المتوفرة بالبوت: (القيمة الداخلية
@@ -1407,18 +1266,7 @@ def get_developer_hole_ratio(vinyl_choice: str | None) -> float:
 # كمصدر وحيد لبناء لوحة "🔒 الحدود" بلوحة المطور، بدل تكرار القائمة بأكثر
 # من مكان.
 VINYL_COLOR_CHOICES: list[tuple[str, str]] = [
-    ("default", "BTN_VINYL_BLACK"),
-    ("pink", "BTN_VINYL_PINK"),
-    ("blue", "BTN_VINYL_BLUE"),
-    ("yellow", "BTN_VINYL_YELLOW"),
-    ("red", "BTN_VINYL_RED"),
-    ("green", "BTN_VINYL_GREEN"),
-    ("bloody", "BTN_VINYL_BLOODY"),
-    ("rose", "BTN_VINYL_ROSE"),
-    ("emerald", "BTN_VINYL_EMERALD"),
-    ("koi", "BTN_VINYL_KOI"),
-    ("kiss", "BTN_VINYL_KISS"),
-    ("ali", "BTN_VINYL_ALI"),
+    (style.key, style.text_key) for style in VINYL_STYLES
 ]
 
 # القيم المقبولة لاختيار اللون مشتقة من القائمة نفسها حتى تبقى المسارات متزامنة.
@@ -1452,13 +1300,17 @@ def build_buy_stars_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
 
 def enqueue_job(job: dict) -> None:
     uid = job.get("uid", 0)
-    if uid != config.DEVELOPER_ID and not job.get("is_preview"):
-        limits.record_usage(uid)
     queue_order.append(job["job_id"])
     if get_job_priority(uid) == 0:
         developer_job_queue.put_nowait(job)
     else:
         job_queue.put_nowait(job)
+
+
+def _release_job_usage(job: dict) -> None:
+    reserved_uid = job.pop("usage_reserved_for", None)
+    if isinstance(reserved_uid, int):
+        limits.release_reserved_usage(reserved_uid)
 
 
 def cancel_user_jobs(user_id: int) -> None:
@@ -1467,6 +1319,7 @@ def cancel_user_jobs(user_id: int) -> None:
         canceled_job_ids.add(job_id)
         job = tracked_jobs.pop(job_id, None)
         if job:
+            _release_job_usage(job)
             cleanup(*job.get("temp_paths", []))
         if job_id in queue_order:
             queue_order.remove(job_id)
@@ -1590,6 +1443,10 @@ async def process_job(bot: Bot, job: dict) -> None:
                 return
             raise
 
+        reserved_uid = job.pop("usage_reserved_for", None)
+        if isinstance(reserved_uid, int):
+            limits.commit_reserved_usage(reserved_uid)
+
         # تنظيف رسائل البوت الوسيطة (اختيار الوضع + خطوات الـ Wizard) بسياق
         # القناة/المجموعة فقط — ما نلمس منشور/رسالة الصوت الأصلية للمستخدم إطلاقًا.
         if _is_shared_context(context_key):
@@ -1612,19 +1469,17 @@ async def process_job(bot: Bot, job: dict) -> None:
         logger.warning(texts_module.LOG_JOB_TIMEOUT)
         try:
             actual_timeout_minutes = compute_job_timeout_seconds(getattr(audio, "file_size", None)) / 60
+            timeout_text = tr("MSG_PROCESSING_TIMEOUT_FMT", uid).format(minutes=actual_timeout_minutes)
             if _is_group_context(context_key):
-                animator.set_stage(texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=actual_timeout_minutes))
+                animator.set_stage(timeout_text)
             else:
-                await reply_with_premium_emoji(
-                    message,
-                    texts_module.MSG_PROCESSING_TIMEOUT_FMT.format(minutes=actual_timeout_minutes),
-                )
+                await reply_with_premium_emoji(message, timeout_text)
         except Exception:
             logger.exception(texts_module.LOG_SEND_ERROR_FAILED)
         raise
-    except Exception as e:
+    except Exception:
         logger.exception(texts_module.LOG_PROCESS_JOB_FAILED)
-        error_text = str(e) or repr(e) or e.__class__.__name__
+        error_text = tr("MSG_PROCESSING_FAILED_SAFE", uid)
         try:
             if _is_group_context(context_key):
                 animator.set_stage(tr("MSG_PROCESSING_ERROR_FMT", uid).format(error_text=error_text))
@@ -1633,6 +1488,7 @@ async def process_job(bot: Bot, job: dict) -> None:
         except Exception:
             logger.exception(texts_module.LOG_SEND_ERROR_FAILED)
     finally:
+        _release_job_usage(job)
         await animator.stop()
         cleanup(audio_path, thumb_path, disc_path, out_path)
         try:
@@ -2723,32 +2579,19 @@ async def on_audio(message: Message, bot: Bot):
     audio = message.audio
 
     if owner_id != config.DEVELOPER_ID and not limits.can_create(owner_id):
-        hours = max(1, math.ceil(limits.get_reset_seconds(owner_id) / 3600))
-        format_kwargs = {
-            "limit": limits.get_daily_limit(owner_id),
-            "hours": hours,
-            "premium_limit": config.PREMIUM_DAILY_LIMIT,
-            "price": config.STARS_SUBSCRIPTION_PRICE,
-        }
-        if is_group:
-            # الرسائل المؤقتة الحالية لا تضمن Rich Message؛ نستخدم النسخة
-            # النصية الاحتياطية، بينما الخاص يرسل Rich كاملًا.
-            limit_text = tr("MSG_LIMIT_REACHED_FMT", owner_id).format(**format_kwargs)
-            await send_ephemeral_text(
-                bot, message.chat.id, owner_id,
-                limit_text,
-                reply_markup=build_buy_stars_keyboard(owner_id),
-            )
-        else:
-            await reply_text_variable(
-                message, bot, "MSG_LIMIT_REACHED_FMT", owner_id,
-                reply_markup=build_buy_stars_keyboard(owner_id),
-                **format_kwargs,
-            )
+        await _send_limit_reached(message, bot, owner_id, is_group=is_group)
         return
 
     if audio.file_size and audio.file_size > config.MAX_TELEGRAM_AUDIO_SIZE_BYTES:
         logger.info(texts_module.LOG_FILE_TOO_LARGE)
+        too_large_text = tr("MSG_AUDIO_TOO_LARGE_FMT", owner_id).format(
+            max_size_mb=config.MAX_TELEGRAM_AUDIO_SIZE_BYTES / (1024 * 1024)
+        )
+        if is_group:
+            await send_ephemeral_text(bot, message.chat.id, owner_id, too_large_text)
+        else:
+            await reply_with_premium_emoji(message, too_large_text)
+        return
 
     pending_audio[uid] = {
         "audio": audio,
@@ -2791,9 +2634,61 @@ def _get_pending_audio_or_none(uid: int) -> dict | None:
     return pending
 
 
-async def _launch_job(bot: Bot, uid: int, job: dict) -> None:
+async def _send_limit_reached(
+    message: Message,
+    bot: Bot,
+    owner_id: int,
+    *,
+    is_group: bool,
+) -> None:
+    hours = max(1, math.ceil(limits.get_reset_seconds(owner_id) / 3600))
+    format_kwargs = {
+        "limit": limits.get_daily_limit(owner_id),
+        "hours": hours,
+        "premium_limit": config.PREMIUM_DAILY_LIMIT,
+        "price": config.STARS_SUBSCRIPTION_PRICE,
+    }
+    if is_group:
+        limit_text = tr("MSG_LIMIT_REACHED_FMT", owner_id).format(**format_kwargs)
+        await send_ephemeral_text(
+            bot,
+            message.chat.id,
+            owner_id,
+            limit_text,
+            reply_markup=build_buy_stars_keyboard(owner_id),
+        )
+        return
+    await reply_text_variable(
+        message,
+        bot,
+        "MSG_LIMIT_REACHED_FMT",
+        owner_id,
+        reply_markup=build_buy_stars_keyboard(owner_id),
+        **format_kwargs,
+    )
+
+
+async def _launch_job(bot: Bot, uid: int, job: dict) -> bool:
     await start_job_worker(bot)
     owner_id = job.get("owner_user_id", job.get("uid", uid))
+    should_charge = (
+        isinstance(owner_id, int)
+        and owner_id != config.DEVELOPER_ID
+        and not limits.is_whitelisted(owner_id)
+        and not job.get("is_preview")
+    )
+    if should_charge and not limits.reserve_usage(owner_id):
+        message = job.get("message")
+        if message is not None:
+            await _send_limit_reached(
+                message,
+                bot,
+                owner_id,
+                is_group=message.chat.type in ("group", "supergroup"),
+            )
+        return False
+    if should_charge:
+        job["usage_reserved_for"] = owner_id
     if _is_group_context(job.get("context_key", uid)):
         job["uid"] = owner_id
     tracked_jobs[job["job_id"]] = job
@@ -2804,6 +2699,7 @@ async def _launch_job(bot: Bot, uid: int, job: dict) -> None:
     message = job.get("message")
     if message is not None:
         await notify_queue_position(bot, message.chat.id, context_key, job["job_id"])
+    return True
 
 
 @router.callback_query(F.data.startswith("mode:quick"))
@@ -3463,8 +3359,7 @@ async def on_photo_for_audio(message: Message, bot: Bot):
         pending_audio.pop(uid, None)
         pending_images.pop(uid, None)
 
-        await start_job_worker(bot)
-        enqueue_job(job)
+        await _launch_job(bot, job["uid"], job)
         return
 
 
@@ -3521,7 +3416,7 @@ async def on_buy_stars(callback, bot: Bot):
         chat_id=callback.message.chat.id,
         title=texts_module.MSG_INVOICE_TITLE,
         description=texts_module.MSG_INVOICE_DESCRIPTION_FMT.format(limit=config.PREMIUM_DAILY_LIMIT),
-        payload=f"{texts_module.MSG_INVOICE_PAYLOAD_PREFIX}_{uid}_{int(time.time())}",
+        payload=build_subscription_payload(uid, int(time.time())),
         provider_token="",  # فارغ إجباريًا لمدفوعات نجوم تليكرام (XTR)
         currency="XTR",
         prices=[LabeledPrice(label=texts_module.MSG_INVOICE_LABEL, amount=config.STARS_SUBSCRIPTION_PRICE)],
@@ -3531,12 +3426,38 @@ async def on_buy_stars(callback, bot: Bot):
 
 @router.pre_checkout_query()
 async def on_pre_checkout(pre_checkout_query: PreCheckoutQuery, bot: Bot):
-    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+    check = validate_subscription_payment(
+        payload=pre_checkout_query.invoice_payload,
+        currency=pre_checkout_query.currency,
+        amount=pre_checkout_query.total_amount,
+        user_id=pre_checkout_query.from_user.id,
+        expected_amount=config.STARS_SUBSCRIPTION_PRICE,
+    )
+    if check.valid:
+        await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+    else:
+        await bot.answer_pre_checkout_query(
+            pre_checkout_query.id,
+            ok=False,
+            error_message=tr("MSG_PAYMENT_INVALID", pre_checkout_query.from_user.id),
+        )
 
 
 @router.message(F.successful_payment, F.chat.type == "private")
 async def on_successful_payment(message: Message, bot: Bot):
     uid = message.from_user.id if message.from_user else 0
+    payment = message.successful_payment
+    check = validate_subscription_payment(
+        payload=payment.invoice_payload,
+        currency=payment.currency,
+        amount=payment.total_amount,
+        user_id=uid,
+        expected_amount=config.STARS_SUBSCRIPTION_PRICE,
+    )
+    if not check.valid:
+        logger.warning("رفض دفعة غير مطابقة للمستخدم %s: %s", uid, check.reason)
+        await reply_text_variable(message, bot, "MSG_PAYMENT_INVALID", uid)
+        return
     limits.activate_subscription(uid, config.STARS_SUBSCRIPTION_DAYS)
     logger.info(texts_module.LOG_PAYMENT_RECORDED, uid)
     await reply_text_variable(message, bot, "MSG_PAYMENT_SUCCESS_FMT", uid, limit=config.PREMIUM_DAILY_LIMIT)
@@ -3550,7 +3471,7 @@ async def on_successful_payment(message: Message, bot: Bot):
                     full_name=user.full_name if user else "-",
                     username=f"@{user.username}" if user and user.username else "-",
                     user_id=uid,
-                    amount=message.successful_payment.total_amount,
+                    amount=payment.total_amount,
                     days=config.STARS_SUBSCRIPTION_DAYS,
                     limit=config.PREMIUM_DAILY_LIMIT,
                 ),

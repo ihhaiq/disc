@@ -5,8 +5,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import config
 import help_storage
 import texts as texts_module
-from handlers import safe_reply, send_rich_message, tr
+from handlers import safe_reply, send_rich_message
 from rich_content import extract_rich_content
+from services.localization import tr
 
 router = Router()
 
