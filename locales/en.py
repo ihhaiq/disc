@@ -26,7 +26,6 @@ TEXTS_EN: dict[str, str] = {
     "MSG_QUICK_NEED_IMAGE": (
         "⚡ Quick create: this file has no thumbnail, send an image now and I'll continue automatically."
     ),
-    "BTN_ADD_IMAGE": "➕ Add image",
     "BTN_CANCEL": "❌ Cancel",
     "BTN_VINYL_PINK": "💗  ",
     "BTN_VINYL_DEFAULT": "🔙 Use default",
@@ -81,8 +80,6 @@ TEXTS_EN: dict[str, str] = {
     "BTN_WIZ_CONFIRM_FULL": "🚀 Create the full video",
     "MSG_WIZ_REVIEW": "✅ All set! You can request a quick preview first, or create the full video right away.",
     "BTN_VINYL_COLOR_PREVIEW": "Preview",
-    "MSG_SEND_IMAGE_NOW": "📷 Send me the image now and I'll use it with the audio file.",
-    "MSG_NO_PENDING_AUDIO": "⚠️ No pending audio file linked to this image yet.",
     "MSG_AUDIO_EXPIRED": "⏰ The audio file wait time expired. Please send the audio file again.",
     "MSG_AUDIO_TOO_LARGE_FMT": (
         "❌ The file is larger than the allowed limit ({max_size_mb:.0f} MB). "
