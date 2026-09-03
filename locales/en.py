@@ -84,6 +84,10 @@ TEXTS_EN: dict[str, str] = {
     "MSG_SEND_IMAGE_NOW": "📷 Send me the image now and I'll use it with the audio file.",
     "MSG_NO_PENDING_AUDIO": "⚠️ No pending audio file linked to this image yet.",
     "MSG_AUDIO_EXPIRED": "⏰ The audio file wait time expired. Please send the audio file again.",
+    "MSG_AUDIO_TOO_LARGE_FMT": (
+        "❌ The file is larger than the allowed limit ({max_size_mb:.0f} MB). "
+        "Send a smaller file and try again."
+    ),
     "MSG_IMAGE_RECEIVED": (
         "✅ Image received, the bot will now start working on the audio file "
         "without needing to send it again."
@@ -122,6 +126,8 @@ TEXTS_EN: dict[str, str] = {
         "✅ Subscription activated successfully!\n"
         "🔓 Your daily limit is now {limit} discs every 24 hours, for 30 days."
     ),
+    "MSG_PAYMENT_INVALID": "❌ The payment details could not be verified. Subscription was not activated.",
+    "MSG_PROCESSING_FAILED_SAFE": "The file could not be processed. Try another file or try again.",
     "BTN_LANG": "🇮🇶 العربية",
     "MSG_RICH_STATUS_INTRO": "I'm preparing a video for you. Please check the status later...",
     "BTN_DEV_SET_MENU_IMAGE": "🖼️ Change menu image",
