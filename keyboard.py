@@ -410,9 +410,7 @@ def build_wiz_speed_keyboard(
         )
         for label, value in labels
     ]
-    return InlineKeyboardMarkup(
-        inline_keyboard=[buttons[:2], buttons[2:4], buttons[4:6]]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[buttons[:2], buttons[2:4], buttons[4:6]])
 
 
 def build_wiz_image_keyboard(
@@ -493,5 +491,131 @@ def build_wiz_confirm_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
                     callback_data="cancel_queue",
                 )
             ],
+        ]
+    )
+
+
+def build_dev_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=texts_module.BTN_VINYL_PINK, callback_data="vinyl:pink")],
+            [InlineKeyboardButton(text=texts_module.BTN_VINYL_DEFAULT, callback_data="vinyl:default")],
+            [InlineKeyboardButton(text=texts_module.BTN_VINYL_YELLOW, callback_data="vinyl:yellow")],
+            [InlineKeyboardButton(text=texts_module.BTN_VINYL_BLUE, callback_data="vinyl:blue")],
+            [InlineKeyboardButton(text=texts_module.BTN_VINYL_GREEN, callback_data="vinyl:green")],
+            [
+                InlineKeyboardButton(
+                    text=texts_module.BTN_DEV_SET_MENU_IMAGE,
+                    callback_data="vinyl_menu_image:set",
+                )
+            ],
+            [InlineKeyboardButton(text="✏️ تحرير النصوص (عربي)", callback_data="dev_text:page:ar:0")],
+            [InlineKeyboardButton(text="✏️ Edit Texts (English)", callback_data="dev_text:page:en:0")],
+            [InlineKeyboardButton(text="🛡️ القائمة البيضاء", callback_data="dev_whitelist:open")],
+            [
+                InlineKeyboardButton(
+                    text=texts_module.BTN_DEV_LIMITS_MENU,
+                    callback_data="dev_limits:open",
+                )
+            ],
+        ]
+    )
+
+
+def build_whitelist_keyboard(user_ids: list[int]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"❌ إزالة {uid}", callback_data=f"dev_whitelist:remove:{uid}")]
+        for uid in user_ids
+    ]
+    rows.extend(
+        [
+            [InlineKeyboardButton(text="➕ إضافة مستخدم", callback_data="dev_whitelist:add")],
+            [InlineKeyboardButton(text=texts_module.BTN_BACK, callback_data="dev_whitelist:back")],
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_dev_limits_keyboard(color_choices: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+    rows = []
+    for value, text_var in color_choices:
+        color_label = getattr(texts_module, text_var, value)
+        is_paid = limits.is_premium_color(value)
+        suffix = (
+            texts_module.BTN_DEV_LIMITS_PAID_SUFFIX
+            if is_paid
+            else texts_module.BTN_DEV_LIMITS_FREE_SUFFIX
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{color_label} — {suffix}",
+                    callback_data=f"dev_limits:toggle:{value}",
+                    style="danger" if is_paid else "primary",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text=texts_module.BTN_BACK, callback_data="dev_limits:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_dev_text_list_keyboard(
+    page_names: list[str],
+    *,
+    page: int,
+    lang: str,
+    has_previous: bool,
+    has_next: bool,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=name, callback_data=f"dev_text:edit:{lang}:{name}")]
+        for name in page_names
+    ]
+    nav_row = []
+    if has_previous:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="◀️ السابق",
+                callback_data=f"dev_text:page:{lang}:{page - 1}",
+            )
+        )
+    if has_next:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="التالي ▶️",
+                callback_data=f"dev_text:page:{lang}:{page + 1}",
+            )
+        )
+    if nav_row:
+        rows.append(nav_row)
+    rows.append([InlineKeyboardButton(text=texts_module.BTN_BACK, callback_data="dev_text:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_help_buttons_keyboard(buttons: list[dict[str, str]]) -> InlineKeyboardMarkup | None:
+    if not buttons:
+        return None
+    rows = [[InlineKeyboardButton(text=button["text"], url=button["url"])] for button in buttons]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_help_builder_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📝 نص الرسالة (Rich Msg)", callback_data="help_builder:settext")],
+            [InlineKeyboardButton(text="➕ اضف زر", callback_data="help_builder:addbtn")],
+            [InlineKeyboardButton(text="👁 معاينة", callback_data="help_builder:preview")],
+            [
+                InlineKeyboardButton(text="💾 حفظ ونشر", callback_data="help_builder:save"),
+                InlineKeyboardButton(text="🔙 رجوع", callback_data="help_builder:back"),
+            ],
+        ]
+    )
+
+
+def build_help_root_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🎛 تخصيص", callback_data="help_builder:menu")]
         ]
     )
