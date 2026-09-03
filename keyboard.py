@@ -10,6 +10,8 @@ from services.localization import tr
 
 VINYL_TEMPLATE_PREVIEW_URL = "https://t.me/VinylTemplate"
 PREVIEW_EMOJI_ID = "5904219717073114606"
+CHANNEL_RESULT_URL = "http://t.me/discbybot?start=help"
+CHANNEL_RESULT_EMOJI = "💌"
 
 PREMIUM_EMOJI_IDS = {
     "emerald": "5285265490350972397",
@@ -18,6 +20,20 @@ PREMIUM_EMOJI_IDS = {
     "ali": "5460737770798489825",
     "black": "5399878127163811970",
 }
+
+
+def build_channel_result_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{CHANNEL_RESULT_EMOJI} كيف اسوي وحدة مثل هذي؟",
+                    url=CHANNEL_RESULT_URL,
+                    style="danger",
+                )
+            ]
+        ]
+    )
 
 
 def build_buy_stars_keyboard(user_id: int = 0) -> InlineKeyboardMarkup:
@@ -188,9 +204,9 @@ def build_vinyl_color_keyboard(
             ],
             [
                 InlineKeyboardButton(
-                    text=label("BTN_VINYL_EMERALD", "Emerald"),
+                    text=label("BTN_VINYL_EMERALD", "emerald"),
                     callback_data="vinyl:emerald",
-                    style="primary",
+                    style=button_style("emerald"),
                     icon_custom_emoji_id=PREMIUM_EMOJI_IDS["emerald"],
                 )
             ],
