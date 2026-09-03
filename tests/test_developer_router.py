@@ -1,4 +1,5 @@
-from routers.developer import build_dev_keyboard, router
+import keyboard as keyboards
+from routers.developer import router
 
 
 def test_developer_router_registers_access_handlers():
@@ -9,7 +10,7 @@ def test_developer_router_registers_access_handlers():
 def test_developer_keyboard_contains_each_management_entry():
     callbacks = {
         button.callback_data
-        for row in build_dev_keyboard().inline_keyboard
+        for row in keyboards.build_dev_keyboard().inline_keyboard
         for button in row
         if button.callback_data
     }
