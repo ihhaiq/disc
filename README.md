@@ -24,6 +24,10 @@ python main.py
 
 القوالب صور PNG مربعة، ويُفضّل إبقاؤها بالمقاس نفسه مع شفافية صحيحة حول القرص.
 
+### إضافة قرص جديد
+
+`vinyl_catalog.py` هو المصدر الرئيسي للأقراص، والقوائم تُبنى منه تلقائيًا. راجع [ADDING_VINYL.md](ADDING_VINYL.md) لخطوات إضافة قالب جديد، النصوص، ترتيب الزر، Custom Emoji، وحالة Premium.
+
 ## إعدادات قابلة للتعديل (متغيرات بيئة)
 
 | المتغير | الافتراضي | الوصف |
@@ -37,31 +41,33 @@ python main.py
 
 ## تحديثات الأزرار (Button Styles)
 
-- 🎨 **قائمة لون القرص** (من رسالة الترحيب وأيضاً من خطوة "🎛 تخصيص"): كل الأزرار تظهر بنمط `primary`، وعند اختيار لون معيّن يتحول زره إلى نمط `success` (فقط بقائمة الترحيب لأنها تُحدَّث بمكانها؛ خطوة التخصيص تنتقل مباشرة للخطوة التالية).
+- 🎨 **قائمة لون القرص** (من رسالة الترحيب وأيضاً من خطوة "🎛 تخصيص"): الأزرار تُبنى تلقائيًا من `VINYL_STYLES`. عند اختيار قرص معيّن يتحول زره إلى نمط `success` بالقائمة الرئيسية؛ خطوة التخصيص تنتقل مباشرة للخطوة التالية.
 - ⏱ **اختيار الدقيقة** (بالضبط المخصص لملف أطول من دقيقة): كل الأزرار بنمط `success`.
 - 🔙 زر الرجوع يبقى بالنمط الافتراضي بدون تغيير.
 
 ## هيكل المشروع
 
-```
+```text
 vinylbot/
 ├── main.py         # نقطة التشغيل + polling
-├── handlers.py      # مسارات البوت وإدارة الطلبات والطابور
-├── compose.py       # لصق صورة الغلاف داخل ثقب القرص (Pillow)
-├── processor.py     # تدوير القرص + دمج الصوت (ffmpeg)
-├── limits.py        # حدود الاستخدام والاشتراكات
-├── texts.py         # النصوص العربية وتنظيف HTML
-├── locales/         # الترجمات المنفصلة
-├── services/        # سياسات السياق واللغة والتحقق من الدفع
-├── routers/         # معالجات تليكرام مفصولة حسب الميزة
-├── storage/         # تخزين JSON ذري ومشترك
-├── rich_content.py  # استخراج وتطبيع الرسائل الغنية
-├── vinyl_catalog.py # كتالوج القوالب ومساراتها
-├── config.py        # الإعدادات
-├── assets/          # قوالب الأقراص والظلال
-├── temp/            # ملفات مؤقتة (تُحذف تلقائياً بعد كل طلب)
+├── handlers.py     # مسارات البوت وإدارة الطلبات والطابور
+├── compose.py      # لصق صورة الغلاف داخل ثقب القرص (Pillow)
+├── processor.py    # تدوير القرص + دمج الصوت (ffmpeg)
+├── limits.py       # حدود الاستخدام والاشتراكات
+├── texts.py        # النصوص العربية
+├── locales/        # الترجمات المنفصلة
+├── services/       # خدمات المعالجة والسياق والرسائل المؤقتة
+├── routers/        # معالجات تليكرام مفصولة حسب الميزة
+├── storage/        # تخزين JSON ذري ومشترك
+├── rich_content.py # استخراج وتطبيع الرسائل الغنية
+├── vinyl_catalog.py # كتالوج القوالب ومساراتها ومعلومات أزرارها
+├── ADDING_VINYL.md # دليل إضافة قرص جديد
+├── config.py       # الإعدادات
+├── assets/         # قوالب الأقراص والظلال
+├── temp/           # ملفات مؤقتة (تُحذف تلقائياً بعد كل طلب)
 └── requirements.txt
 ```
+
 # en
 # Vinyl Bot
 
@@ -77,57 +83,50 @@ pip install -r requirements.txt
 
 export BOT_TOKEN="Place the token here"
 python main.py
-
 ```
 
 ## Template Files (assets/)
 
 - `vinyl*.png` — Available vinyl templates in their different colors and designs.
-
 - `shadow*.png` — Static shadow and lighting layers placed over the disc.
 
 Templates should remain square PNG images with correct transparency around the disc.
 
+`vinyl_catalog.py` is the single source of truth for vinyl templates and button layout. See [ADDING_VINYL.md](ADDING_VINYL.md) for the current add-template workflow.
+
 ## Adjustable Settings (Environment Variables)
 
 | Variable | Default | Description |
-
 |---|---|---|
-
 | `MAX_CONCURRENT_JOBS` | 2 | Number of concurrent processors |
-
 | `ROTATION_SECONDS` | 4 | Duration of a full disk rotation (seconds) |
-
 | `OUTPUT_FPS` | 30 | Output video frames |
-
 | `DISC_SIZE` | 640 | Video size (square, Telegram Video Note) |
-
 | `HOLE_RATIO` | 0.42 | Hole diameter to disk size ratio |
-
 | `MAX_DURATION_SECONDS` | 60 | Maximum (Telegram Video Note limit) |
 
 ## Project Structure
 
-```
+```text
 vinylbot/
 ├── main.py # Startup point + polling
 ├── handlers.py # Bot routes, requests, and queue management
 ├── compose.py # Paste cover image into disk hole (Pillow)
 ├── processor.py # Disk rotation + audio merging (ffmpeg)
 ├── limits.py # Usage limits and subscriptions
-├── texts.py # Arabic source strings and HTML cleanup
+├── texts.py # Arabic source strings
 ├── locales/ # Separate translations
-├── services/ # Context, localization, and payment policies
+├── services/ # Processing, context, localization, and ephemeral-message services
 ├── routers/ # Telegram handlers split by feature
 ├── storage/ # Shared atomic JSON persistence
 ├── rich_content.py # Rich-message normalization
-├── vinyl_catalog.py # Vinyl template catalog
+├── vinyl_catalog.py # Vinyl template and button catalog
+├── ADDING_VINYL.md # Guide for adding a new vinyl template
 ├── config.py # Settings
 ├── assets/ # Vinyl and shadow templates
 ├── temp/ # Temporary files (automatically deleted after each request)
 └── requirements.txt
 ```
-
 
 ## فحوصات التطوير / Development checks
 
