@@ -5,9 +5,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import config
 import help_storage
 import texts as texts_module
-from handlers import safe_reply, send_rich_message
 from rich_content import extract_rich_content
 from services.localization import tr
+from services.messaging import safe_reply, send_rich_message
 
 router = Router()
 
@@ -37,10 +37,12 @@ def _buttons_keyboard(buttons: list[dict[str, str]]) -> InlineKeyboardMarkup | N
 def _builder_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(
-                text="📝 نص الرسالة (Rich Msg)",
-                callback_data="help_builder:settext",
-            )],
+            [
+                InlineKeyboardButton(
+                    text="📝 نص الرسالة (Rich Msg)",
+                    callback_data="help_builder:settext",
+                )
+            ],
             [InlineKeyboardButton(text="➕ اضف زر", callback_data="help_builder:addbtn")],
             [InlineKeyboardButton(text="👁 معاينة", callback_data="help_builder:preview")],
             [
@@ -71,7 +73,8 @@ async def on_help(message: Message, bot: Bot):
         published = help_storage.get_published()
         if published:
             await send_rich_message(
-                bot, message.chat.id,
+                bot,
+                message.chat.id,
                 html_content=published.get("html"),
                 blocks=published.get("blocks"),
                 reply_to_message_id=message.message_id,
@@ -85,7 +88,8 @@ async def on_help(message: Message, bot: Bot):
     help_awaiting_button.discard(uid)
     draft = help_storage.get_draft(uid)
     await send_rich_message(
-        bot, message.chat.id,
+        bot,
+        message.chat.id,
         html_content=draft.get("html"),
         blocks=draft.get("blocks"),
         reply_to_message_id=message.message_id,
@@ -142,14 +146,13 @@ async def on_help_preview(callback: CallbackQuery, bot: Bot):
         return
     draft = help_storage.get_draft(uid)
     await send_rich_message(
-        bot, callback.message.chat.id,
+        bot,
+        callback.message.chat.id,
         html_content=draft.get("html"),
         blocks=draft.get("blocks"),
         reply_markup=_buttons_keyboard(draft.get("buttons", [])),
     )
-    await callback.answer(
-        "👁 هذي المعاينة النهائية مثل ما راح يشوفها المستخدمين"
-    )
+    await callback.answer("👁 هذي المعاينة النهائية مثل ما راح يشوفها المستخدمين")
 
 
 @router.callback_query(F.data == "help_builder:save")
@@ -162,8 +165,7 @@ async def on_help_save(callback: CallbackQuery):
     editor_name = (user.first_name or user.username or f"User{uid}") if user else "Unknown"
     help_storage.publish(uid, draft, editor_name=editor_name)
     await callback.message.reply(
-        "✅ تم حفظ ونشر رسالة /help الجديدة. "
-        "كل المستخدمين راح يشوفوها من الآن."
+        "✅ تم حفظ ونشر رسالة /help الجديدة. كل المستخدمين راح يشوفوها من الآن."
     )
     await callback.answer("✅ تم النشر")
 
@@ -177,7 +179,8 @@ async def on_help_back(callback: CallbackQuery, bot: Bot):
     help_awaiting_button.discard(uid)
     draft = help_storage.get_draft(uid)
     await send_rich_message(
-        bot, callback.message.chat.id,
+        bot,
+        callback.message.chat.id,
         html_content=draft.get("html"),
         blocks=draft.get("blocks"),
         reply_markup=_root_keyboard(),
@@ -186,11 +189,10 @@ async def on_help_back(callback: CallbackQuery, bot: Bot):
 
 
 @router.message(
-    lambda m: m.text == "/cancel_edit"
-    and bool(m.from_user)
-    and (
-        m.from_user.id in help_awaiting_text
-        or m.from_user.id in help_awaiting_button
+    lambda m: (
+        m.text == "/cancel_edit"
+        and bool(m.from_user)
+        and (m.from_user.id in help_awaiting_text or m.from_user.id in help_awaiting_button)
     )
 )
 async def on_help_cancel_edit(message: Message):
