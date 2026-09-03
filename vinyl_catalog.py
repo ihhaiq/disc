@@ -92,6 +92,13 @@ VINYL_STYLES: tuple[VinylStyle, ...] = (
         button_row=6,
         icon_custom_emoji_id="5460737770798489825",
     ),
+    VinylStyle(
+        "ocean",
+        "BTN_VINYL_OCEAN",
+        "vinyl_ocean.png",
+        "shadow_rose.png",
+        button_row=7,
+    ),
 )
 
 VINYL_STYLE_BY_KEY = {style.key: style for style in VINYL_STYLES}
