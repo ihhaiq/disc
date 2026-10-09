@@ -1,6 +1,6 @@
-import { api } from 'sdk';
+import { api, db } from 'sdk';
 import { eq } from 'sdk/db';
-import { users } from '../schema.js';
+import { users, overrides } from '../schema.js';
 import { CONFIG, developer } from '../lib/config.js';
 import { getUser, getSession, updateUser, canUseColor } from '../lib/state.js';
 import { tr } from '../lib/i18n.js';
@@ -29,7 +29,7 @@ export default async function (c) {
   const uid=c.from.id;
   const u=await getUser(uid),lang=u?.lang||'ar';
   const parsed=parseContext(c.data),data=parsed.action;
-  if(data.startsWith('dev_')||data==='dev_back'){
+  if(data.startsWith('dev_')||data==='dev_back'||data==='vinyl_menu_image:set'){
     if(!developer(uid)){await answer(c,'هذا الخيار للمطور فقط',true);return;}
     if(await developerCallback(c,data))await answer(c);return;
   }
@@ -55,10 +55,28 @@ export default async function (c) {
     await edit(c.message,await tr('start',lang)+(CONFIG.RENDERER_ENABLED?'':'\n\n'+await tr('renderer',lang)),await startKeyboard(uid,lang));await answer(c);return;
   }
   if(data==='vinyl_menu:open'){
-    await edit(c.message,await tr('color',lang),await colorKeyboard(uid,lang));await answer(c);return;
+    const photo=await db.select().from(overrides).where(eq(overrides.key,'__vinyl_menu_photo_id')).get();
+    if(photo?.value) {
+      try {
+        await api.deleteMessage({chat_id:c.message.chat.id,message_id:c.message.message_id});
+        await api.sendPhoto({chat_id:c.message.chat.id,photo:photo.value,
+          caption:await tr('color',lang),reply_markup:await colorKeyboard(uid,lang)});
+      } catch(error) {
+        console.warn('Vinyl menu photo unavailable, showing text menu',String(error?.description||error));
+        await api.sendMessage({chat_id:c.message.chat.id,text:await tr('color',lang),
+          parse_mode:'HTML',reply_markup:await colorKeyboard(uid,lang)});
+      }
+    }else await edit(c.message,await tr('color',lang),await colorKeyboard(uid,lang));
+    await answer(c);return;
   }
   if(data==='vinyl_menu:back'){
-    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,u.rotation));await answer(c);return;
+    if(c.message.photo?.length){
+      try {await api.deleteMessage({chat_id:c.message.chat.id,message_id:c.message.message_id});}
+      catch(error){console.warn('Could not remove color menu photo',String(error?.description||error));}
+      await api.sendMessage({chat_id:c.message.chat.id,text:await tr('customize',lang),
+        parse_mode:'HTML',reply_markup:await speedKeyboard(lang,null,u.rotation)});
+    }else await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,u.rotation));
+    await answer(c);return;
   }
   if(data.startsWith('vinyl:')){
     const key=data.slice(6);
