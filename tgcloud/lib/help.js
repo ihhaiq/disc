@@ -1,8 +1,8 @@
 import { api, db } from 'sdk';
 import { eq } from 'sdk/db';
 import { helpDocs } from '../schema.js';
-import { developer } from './config.js';
-import { updateUser } from './state.js';
+import { developer, CONFIG } from './config.js';
+import { updateUser, getUser } from './state.js';
 import { kb } from './keyboard.js';
 import { reply, send, answer } from './io.js';
 import { tr } from './i18n.js';
@@ -33,7 +33,8 @@ export async function sendHelp(message) {
   const uid=message.from?.id||0;
   const r=developer(uid)?await draft(uid):await read('published');
   if(!r) {
-    await reply(message,await tr('start',(message._lang||'ar')));return;
+    const lang=(await getUser(uid))?.lang||'ar';
+    await reply(message,(await tr('start',lang))+(CONFIG.RENDERER_ENABLED?'':'\n\n'+await tr('renderer',lang)));return;
   }
   await reply(message,r.html,markup(r,developer(uid)?editorRoot:null));
 }
