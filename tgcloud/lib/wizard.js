@@ -40,7 +40,7 @@ export async function handlePhoto(message) {
   if(!s && message.reply_to_message?.message_id) {
     s=await getSession('g'+message.chat.id+':'+message.reply_to_message.message_id);
   }
-  if(!s && ['group','supergroup'].includes(message.chat.type)) {
+  if(!s && message.reply_to_message?.message_id && ['group','supergroup'].includes(message.chat.type)) {
     const recent=await db.select().from(sessions).where(and(eq(sessions.ownerId,uid),eq(sessions.chatId,message.chat.id),eq(sessions.step,'photo'),eq(sessions.promptId,message.reply_to_message?.message_id||0)))
       .orderBy(desc(sessions.createdAt)).limit(1).get();
     if(recent) s=await getSession(recent.key);
@@ -79,7 +79,7 @@ export async function callbackWizard(c,s,data) {
   if(data.startsWith('wiz_color:')&&s.step==='color'){
     const key=data.split(':')[1],valid=styleOf(key).key===key;
     if(!valid)return true;
-    if(!(await canUseColor(uid,key))){await answer(c,await tr('premium',lang),true);return 'alert';}
+    if(!(await canUseColor(uid,key))){await answer(c,await tr(CONFIG.RENDERER_ENABLED?'premium':'renderer',lang),true);return 'alert';}
     await patchSession(s.key,{style:key,step:'speed'});
     await edit(chatMsg,await tr('speed',lang),await speedKeyboard(lang,{...s,style:key}));return true;
   }
