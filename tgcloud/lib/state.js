@@ -1,6 +1,6 @@
 // No in-memory process globals: each callback may run in a different isolate.
 import { db } from 'sdk';
-import { eq, and, gt } from 'sdk/db';
+import { eq } from 'sdk/db';
 import { users, sessions, whitelist, premiumColors, receipts } from '../schema.js';
 import { CONFIG, now, developer } from './config.js';
 export async function getUser(uid) {
@@ -20,7 +20,8 @@ export async function premium(uid) {
   return await isExempt(uid) || (await getUser(uid))?.premiumUntil > now();
 }
 export async function colorPaid(key) {
-  return !!(await db.select().from(premiumColors).where(eq(premiumColors.key, key)).get())?.paid;
+  const entry=await db.select().from(premiumColors).where(eq(premiumColors.key, key)).get();
+  return Boolean(entry?.paid);
 }
 export async function canUseColor(uid, key) { return !(await colorPaid(key)) || await premium(uid); }
 export async function limitStatus(uid) {
