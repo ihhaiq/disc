@@ -14,10 +14,10 @@ export async function startKeyboard(uid,lang) {
     [cb(await tr('lang',lang),'lang:toggle',{style:'success'}),cb(await tr('customize',lang),'customize:open',{style:'danger'})]
   ]);
 }
-export async function speedKeyboard(lang,s=null) {
+export async function speedKeyboard(lang,s=null,selectedRotation=null) {
   const labels=(await tr('speedLabels',lang));
   const names=Array.isArray(labels)?labels:['Full turn','8 RPM','19 RPM','33 RPM','45 RPM'];
-  const buttons=SPEEDS.map((speed,i)=>cb(names[i]+(s && String(s.rotation)===String(rotationSeconds(speed))?' ✅':''),s?ctxData('wiz_speed:'+speed,s):'speed:'+speed,{style:'primary'}));
+  const buttons=SPEEDS.map((speed,i)=>cb(names[i]+(String(s?.rotation ?? selectedRotation)===String(rotationSeconds(speed))?' ✅':''),s?ctxData('wiz_speed:'+speed,s):'speed:'+speed,{style:'primary'}));
   if(s) return kb([buttons.slice(0,2),buttons.slice(2,4),buttons.slice(4)]);
   return kb([buttons.slice(0,2),buttons.slice(2,4),buttons.slice(4),[cb(await tr('color',lang),'vinyl_menu:open')],[cb(await tr('back',lang),'customize:back')]]);
 }
