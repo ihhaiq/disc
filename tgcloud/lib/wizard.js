@@ -70,7 +70,7 @@ export async function callbackWizard(c,s,data) {
   if(data.startsWith('wiz_color:')&&s.step==='color'){
     const key=data.split(':')[1],valid=styleOf(key).key===key;
     if(!valid)return true;
-    if(!(await canUseColor(uid,key))){await answer(c,await tr('premium',lang),true);return true;}
+    if(!(await canUseColor(uid,key))){await answer(c,await tr('premium',lang),true);return 'alert';}
     await patchSession(s.key,{style:key,step:'speed'});
     await edit(chatMsg,await tr('speed',lang),await speedKeyboard(lang,{...s,style:key}));return true;
   }
@@ -81,7 +81,7 @@ export async function callbackWizard(c,s,data) {
     await edit(chatMsg,await tr('photo',lang),await photoKeyboard(uid,lang,s));return true;
   }
   if(data==='wiz_image:skip'&&s.step==='photo'){
-    if(!s.thumbId){await answer(c,await tr('noThumb',lang),true);return true;}
+    if(!s.thumbId){await answer(c,await tr('noThumb',lang),true);return 'alert';}
     await advance(s,lang);return true;
   }
   if(data.startsWith('wiz_segment:')&&s.step==='segment'){
@@ -92,7 +92,7 @@ export async function callbackWizard(c,s,data) {
   }
   if(['wiz_preview_confirm','wiz_full_confirm'].includes(data)&&s.step==='confirm') {
     // No render or usage charge until a real FFmpeg-equivalent backend exists.
-    await answer(c,await tr('renderer',lang),true);return true;
+    await answer(c,await tr('renderer',lang),true);return 'alert';
   }
   return false;
 }
