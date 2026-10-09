@@ -50,3 +50,13 @@
 - Restricted `/help` and `/start` routing to exact Telegram commands rather than accepting `/helper` or `/startfoo` prefixes; preserves the `/start help` deep link.
 - Added `tests/serverless/ui-parity.test.mjs` to guard developer UI, stored disc menu photo, rich help, paginated minute selection, and inactive payment gate.
 - Reviewed all 17 `tgcloud/*.js` modules on the branch with isolated V8 syntax compilation and cross-checked all relative imports; **0 syntax or missing-import errors** in this check. This does not substitute for production execution or the GitHub Actions runner.
+
+## 2026-10-09 — Canonical main labels and isolated JS logic tests
+
+- Compared `main/texts.py` (108 values) and `main/locales/en.py` (92 values) against `tgcloud/lib/original-texts.js`: **200 exact matches; zero missing/differing strings**. This covers source texts only, not all runtime routes.
+- Mapped 13 disc styles to original text keys; restored original button labels, spacing, emoji IDs, active/wizard styles, speed labels, developer menu and settings/color headers. Reason: previous hard-coded text variants did not match Python.
+- Fixed wizard cancellation texts and channel cover-photo reply handling; updated `channel_post` handler. Reason: canceled jobs showed an expiry error and the channel photo path was unreachable.
+- Added executable Node tests `main-parity.test.mjs` (6 cases) and `logic-parity.test.mjs` (3 cases), and a complete local syntax/import checking script. Updated `npm run check` to invoke full checks and tests. Executed all 9 new tests in isolated JavaScript with mocked SDK; **9/9 passed**. The earlier 4 pure formatting cases also passed in isolated JS.
+- The GitHub Actions runs remain **red** with empty job steps and unavailable log downloads, so actual CI success remains unverified; no valid `npm run check` execution on a checked-out full repository is claimed.
+- **No Telegram Cloud deployment**: environment has no cloud CLI credentials/project login, no Telegram deployment integration and cannot clone/install via outbound network. Renderer still off; no production migration, checkout or replacement of the Python bot.
+- Full detail: `docs/serverless-parity-audit-2026-10-09.md`.
