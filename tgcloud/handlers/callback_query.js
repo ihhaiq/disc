@@ -44,12 +44,12 @@ export default async function (c) {
     if(keys.some(x=>x?.startsWith('vinyl:')))
       await edit(c.message,await tr('color',next),await colorKeyboard(uid,next));
     else if(keys.some(x=>x?.startsWith('speed:')))
-      await edit(c.message,await tr('customize',next),await speedKeyboard(next));
+      await edit(c.message,await tr('customize',next),await speedKeyboard(next,null,u.rotation));
     else await edit(c.message,await tr('start',next)+(CONFIG.RENDERER_ENABLED?'':'\n\n'+await tr('renderer',next)),await startKeyboard(uid,next));
     await answer(c,next.toUpperCase());return;
   }
   if(data==='customize:open'){
-    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang));await answer(c);return;
+    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,u.rotation));await answer(c);return;
   }
   if(data==='customize:back'){
     await edit(c.message,await tr('start',lang)+(CONFIG.RENDERER_ENABLED?'':'\n\n'+await tr('renderer',lang)),await startKeyboard(uid,lang));await answer(c);return;
@@ -58,7 +58,7 @@ export default async function (c) {
     await edit(c.message,await tr('color',lang),await colorKeyboard(uid,lang));await answer(c);return;
   }
   if(data==='vinyl_menu:back'){
-    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang));await answer(c);return;
+    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,u.rotation));await answer(c);return;
   }
   if(data.startsWith('vinyl:')){
     const key=data.slice(6);
@@ -74,7 +74,7 @@ export default async function (c) {
     const speed=data.slice(6);
     if(!SPEEDS.includes(speed)){await answer(c,'Invalid speed',true);return;}
     await updateUser(uid,{rotation:String(rotationSeconds(speed))});
-    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang));
+    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,u.rotation));
     await answer(c,lang==='en'?'Saved':'✅ تم حفظ السرعة');return;
   }
   if(data==='buy_stars'){
