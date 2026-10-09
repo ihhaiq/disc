@@ -8,3 +8,7 @@ data/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Telegram Serverless CLI local credentials and Node dependencies
+.tgcloud/
+node_modules/
