@@ -1,5 +1,8 @@
 // Durable wizard transitions, no long-running jobs in isolates.
 import { CONFIG, now } from './config.js';
+import { db } from 'sdk';
+import { eq, and, desc } from 'sdk/db';
+import { sessions } from '../schema.js';
 import { getUser, saveSession, getSession, patchSession, deleteSession, sessionKey, canUseColor, limitStatus } from './state.js';
 import { tr } from './i18n.js';
 import { modeKeyboard, colorKeyboard, speedKeyboard, photoKeyboard, segmentKeyboard, confirmKeyboard } from './keyboard.js';
@@ -34,8 +37,12 @@ export async function handlePhoto(message) {
   // One personal context or the latest active group session from the same sender.
   let s=await getSession('u'+uid);
   if(!s && message.reply_to_message?.message_id) {
-    // The owner controls their group wizard by replying to the original audio.
     s=await getSession('g'+message.chat.id+':'+message.reply_to_message.message_id);
+  }
+  if(!s && ['group','supergroup'].includes(message.chat.type)) {
+    const recent=await db.select().from(sessions).where(and(eq(sessions.ownerId,uid),eq(sessions.chatId,message.chat.id),eq(sessions.step,'photo')))
+      .orderBy(desc(sessions.createdAt)).limit(1).get();
+    if(recent) s=await getSession(recent.key);
   }
   if(!s || s.step!=='photo')return false;
   const lang=(await getUser(uid))?.lang||'ar';
