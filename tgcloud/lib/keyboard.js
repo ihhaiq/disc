@@ -1,5 +1,6 @@
 import { api } from 'sdk';
 import { STYLES, SPEEDS, rotationSeconds } from './catalog.js';
+import { ORIGINAL_AR } from './original-texts.js';
 import { CONFIG } from './config.js';
 import { tr } from './i18n.js';
 import { getUser, colorPaid, premium } from './state.js';
@@ -10,16 +11,16 @@ export const ctxData=(data,s)=>s.key.startsWith('u')?data:data+':'+s.chatId+':'+
 export async function startKeyboard(uid,lang) {
   const me=await api.getMe();
   return kb([
-    [{text:lang==='en'?'➕ Add to group':'➕ أضفني للمجموعة',url:'https://t.me/'+me.username+'?startgroup=start',style:'primary'}],
+    [{text:'➕ أضفني للمجموعة',url:'https://t.me/'+me.username+'?startgroup=start',style:'primary'}],
     [cb(await tr('lang',lang),'lang:toggle',{style:'success'}),cb(await tr('customize',lang),'customize:open',{style:'danger'})]
   ]);
 }
 export async function speedKeyboard(lang,s=null,selectedRotation=null) {
-  const labels=(await tr('speedLabels',lang));
-  const names=Array.isArray(labels)?labels:['Full turn','8 RPM','19 RPM','33 RPM','45 RPM'];
+  const names=await Promise.all(['SPEED_LABEL_FULL','SPEED_LABEL_8RPM',
+    'SPEED_LABEL_19RPM','SPEED_LABEL_33RPM','SPEED_LABEL_45RPM'].map(key=>tr(key,lang)));
   const buttons=SPEEDS.map((speed,i)=>cb(names[i]+(String(s?.rotation ?? selectedRotation)===String(rotationSeconds(speed))?' ✅':''),s?ctxData('wiz_speed:'+speed,s):'speed:'+speed,{style:'primary'}));
   if(s) return kb([buttons.slice(0,2),buttons.slice(2,4),buttons.slice(4)]);
-  return kb([buttons.slice(0,2),buttons.slice(2,4),buttons.slice(4),[cb(await tr('color',lang),'vinyl_menu:open')],[cb(await tr('back',lang),'customize:back')]]);
+  return kb([buttons.slice(0,2),buttons.slice(2,4),buttons.slice(4),[cb(await tr('BTN_VINYL_COLOR_MENU',lang),'vinyl_menu:open',{style:'danger'})],[cb(await tr('back',lang),'customize:back')]]);
 }
 export async function colorKeyboard(uid,lang,s=null) {
   const u=await getUser(uid), allowed=await premium(uid);
@@ -29,13 +30,15 @@ export async function colorKeyboard(uid,lang,s=null) {
     for(const style of STYLES.filter(x=>x.row===row)) {
       const paid=await colorPaid(style.key);
       const selected=(s?s.style:u?.style)===style.key;
-      arr.push(cb((paid&&!allowed?'🔒 ':'')+(lang==='en'?style.label:style.ar)+(selected?' ✅':''),s?ctxData('wiz_color:'+style.key,s):'vinyl:'+style.key,{
-        style:selected?'success':'default',...(style.emoji?{icon_custom_emoji_id:style.emoji}:{})
+      arr.push(cb((paid&&!allowed?'🔒 ':'')+(await tr(style.textKey,lang))+(selected&&!s?' ✅':''),s?ctxData('wiz_color:'+style.key,s):'vinyl:'+style.key,{
+        style:s?'primary':selected?'success':'default',
+        ...(style.emoji?{icon_custom_emoji_id:style.emoji}:{})
       }));
     }
     rows.push(arr);
   }
-  rows.push([{text:lang==='en'?'Preview templates':'معاينة',url:'https://t.me/VinylTemplate'}]);
+  rows.push([{text:await tr('BTN_VINYL_COLOR_PREVIEW',lang),url:'https://t.me/VinylTemplate',
+    icon_custom_emoji_id:'5904219717073114606'}]);
   if(!s) rows.push([cb(await tr('back',lang),'vinyl_menu:back')]);
   return kb(rows);
 }
@@ -69,14 +72,22 @@ export async function confirmKeyboard(uid,lang,s) {
 export async function payKeyboard(lang) {
  return kb([[cb(await tr('buy',lang,{price:CONFIG.STARS_SUBSCRIPTION_PRICE}),'buy_stars')]]);
 }
-export const DEV_MENU=kb([
+// Static fallback matches the initial Python menu; developerKeyboard() additionally
+// loads developer-edited text overrides to preserve the original mutable labels.
+const devRows = label => [
   ...[...new Set(STYLES.map(s=>s.row))].sort((a,b)=>a-b).map(row=>
-    STYLES.filter(s=>s.row===row).map(s=>cb(s.ar,'vinyl:'+s.key,
-      s.emoji?{icon_custom_emoji_id:s.emoji}:{}))),
-  [cb('🖼 صورة قائمة الأقراص','vinyl_menu_image:set')],
+    STYLES.filter(s=>s.row===row).map(style=>cb(label(style.textKey),'vinyl:'+style.key,
+      style.emoji?{icon_custom_emoji_id:style.emoji}:{}))),
+  [cb(label('BTN_DEV_SET_MENU_IMAGE'),'vinyl_menu_image:set')],
   [cb('✏️ تحرير النصوص (عربي)','dev_text:page:ar:0')],
   [cb('✏️ Edit Texts (English)','dev_text:page:en:0')],
   [cb('🛡️ القائمة البيضاء','dev_whitelist:open')],
-  [cb('🔒 الأقراص المدفوعة','dev_limits:open')],
-  [cb('📝 /help','help_builder:menu')],
-]);
+  [cb(label('BTN_DEV_LIMITS_MENU'),'dev_limits:open')],
+];
+export const DEV_MENU=kb(devRows(key=>ORIGINAL_AR[key]||key));
+export async function developerKeyboard() {
+  const keys=['BTN_DEV_SET_MENU_IMAGE','BTN_DEV_LIMITS_MENU',...STYLES.map(s=>s.textKey)];
+  const labels=await Promise.all(keys.map(k=>tr(k,'ar')));
+  const lookup=new Map(keys.map((k,i)=>[k,labels[i]]));
+  return kb(devRows(key=>lookup.get(key)||key));
+}
