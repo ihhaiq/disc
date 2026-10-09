@@ -56,4 +56,14 @@ export async function confirmKeyboard(uid,lang,s) {
 export async function payKeyboard(lang) {
  return kb([[cb(await tr('buy',lang,{price:CONFIG.STARS_SUBSCRIPTION_PRICE}),'buy_stars')]]);
 }
-export const DEV_MENU=kb([[cb('🔒 الأقراص المدفوعة','dev_limits:open')],[cb('🛡 القائمة البيضاء','dev_whitelist:open')],[cb('📝 /help','help_builder:menu')],[cb('✏️ تحرير النصوص','dev_text:menu')]]);
+export const DEV_MENU=kb([
+  ...[...new Set(STYLES.map(s=>s.row))].sort((a,b)=>a-b).map(row=>
+    STYLES.filter(s=>s.row===row).map(s=>cb(s.ar,'vinyl:'+s.key,
+      s.emoji?{icon_custom_emoji_id:s.emoji}:{}))),
+  [cb('🖼 صورة قائمة الأقراص','vinyl_menu_image:set')],
+  [cb('✏️ تحرير النصوص (عربي)','dev_text:page:ar:0')],
+  [cb('✏️ Edit Texts (English)','dev_text:page:en:0')],
+  [cb('🛡️ القائمة البيضاء','dev_whitelist:open')],
+  [cb('🔒 الأقراص المدفوعة','dev_limits:open')],
+  [cb('📝 /help','help_builder:menu')],
+]);
