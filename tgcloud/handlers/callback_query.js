@@ -74,7 +74,7 @@ export default async function (c) {
     const speed=data.slice(6);
     if(!SPEEDS.includes(speed)){await answer(c,'Invalid speed',true);return;}
     await updateUser(uid,{rotation:String(rotationSeconds(speed))});
-    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,u.rotation));
+    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,String(rotationSeconds(speed))));
     await answer(c,lang==='en'?'Saved':'✅ تم حفظ السرعة');return;
   }
   if(data==='buy_stars'){
