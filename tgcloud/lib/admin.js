@@ -62,10 +62,10 @@ async function colorView(chatMessage){
 }
 export async function developerCallback(c,data){
   const uid=c.from.id;
-  if(!developer(uid)){await answer(c,'هذا الخيار للمطور فقط',true);return true;}
+  if(!developer(uid)){await answer(c,'هذا الخيار للمطور فقط',true);return 'answered';}
   if(data==='dev_limits:open'||data.startsWith('dev_limits:toggle:')){
     if(data.startsWith('dev_limits:toggle:')){
-      const key=data.split(':')[2];if(!STYLES.some(x=>x.key===key)){await answer(c,'قرص غير معروف',true);return true;}
+      const key=data.split(':')[2];if(!STYLES.some(x=>x.key===key)){await answer(c,'قرص غير معروف',true);return 'answered';}
       const paid=await colorPaid(key);
       await db.insert(premiumColors).values({key,paid:paid?0:1})
         .onConflictDoUpdate({target:premiumColors.key,set:{paid:paid?0:1}}).run();
@@ -90,7 +90,7 @@ export async function developerCallback(c,data){
   }
   if(data.startsWith('dev_text:page:')){
     const [, ,lang,pageString]=data.split(':');
-    if(!['ar','en'].includes(lang)||!/^\d{1,5}$/.test(pageString||'')){await answer(c,'صفحة غير صحيحة',true);return true;}
+    if(!['ar','en'].includes(lang)||!/^\d{1,5}$/.test(pageString||'')){await answer(c,'صفحة غير صحيحة',true);return 'answered';}
     await textPage(c.message,lang,Number(pageString));return true;
   }
   if(data.startsWith('dev_text:edit:')){
