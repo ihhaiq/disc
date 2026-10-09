@@ -94,14 +94,15 @@ export async function deleteSession(key) { await db.delete(sessions).where(eq(se
 export async function recomputePremium(uid) {
   // The immutable receipt ledger, not an incremental counter, is the source of truth.
   // A process interruption between insert and account update is repaired on read.
+  const u=await getUser(uid);
   const rows=await db.select().from(receipts).where(eq(receipts.userId,uid)).all();
   rows.sort((a,b)=>(a.paidAt-b.paidAt)||a.chargeId.localeCompare(b.chargeId));
-  let expires=0;
+  // Legacy subscriptions are a fixed baseline, never repeatedly added on a read/retry.
+  let expires=u.premiumBaseUntil||0;
   for(const p of rows)expires=Math.max(expires,p.paidAt)+CONFIG.STARS_SUBSCRIPTION_DAYS*86400;
-  const u=await getUser(uid);
-  if(expires>u.premiumUntil) await db.update(users).set({premiumUntil:expires})
-    .where(eq(users.id,uid)).run();
-  return Math.max(expires,u.premiumUntil);
+  await db.run('UPDATE vinyl_users SET premium_until = MAX(premium_until, :expires) WHERE id = :uid',
+    {':expires':expires,':uid':uid});
+  return (await getUser(uid)).premiumUntil;
 }
 export async function addReceipt(payment,uid) {
   const chargeId = payment.telegram_payment_charge_id;

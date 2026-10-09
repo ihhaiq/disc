@@ -161,7 +161,9 @@ test('whitelist/developer exemptions and paid-color access persist',async t=>{
   const h=await setup(t);await h.state.updateUser(9,{used:3});
   await h.db.insert(h.schema.whitelist).values({id:9,addedAt:h.clock.now}).onConflictDoUpdate({target:h.schema.whitelist.id,set:{id:9}}).run();
   await h.dispatchMessage(h.message(9,11,{audio:note}));assert.ok(await h.state.getSession('u9'));
-  await h.dispatchCallback(99,'dev_limits:toggle:blue',h.message(99,30));
+  await h.dispatchCallback(99,'dev_limits:open',h.message(99,30));
+  const blue=h.calls.at(-2).args.reply_markup.inline_keyboard.flat().find(b=>b.callback_data.startsWith('dev_limits:set:blue:'));
+  await h.dispatchCallback(99,blue.callback_data,h.message(99,30));
   assert.equal(await h.state.canUseColor(8,'blue'),false);assert.equal(await h.state.canUseColor(9,'blue'),true);
   assert.equal(await h.state.canUseColor(99,'blue'),true);
 });
@@ -238,7 +240,9 @@ test('help drafts/buttons/publishing preserve rich media and clear pending edito
   await h.dispatchMessage(h.message(9,4,{text:'/help'}));
   const sent=h.calls.filter(c=>c.method==='sendRichMessage').at(-1).args;
   assert.equal(sent.rich_message.is_rtl,true);assert.equal(sent.reply_markup.inline_keyboard[0][0].url,'https://example.com/path');
-  await h.dispatchCallback(99,'help_builder:buttons',msg);await h.dispatchCallback(99,'help_builder:remove:0',msg);
+  await h.dispatchCallback(99,'help_builder:buttons',msg);
+  const remove=h.calls.at(-2).args.reply_markup.inline_keyboard[0][0].callback_data;
+  await h.dispatchCallback(99,remove,msg);
   await h.dispatchCallback(99,'help_builder:settext',msg);await h.dispatchCallback(99,'help_builder:back',msg);
   assert.equal((await h.state.getUser(99)).pendingAction,'');
   assert.deepEqual(JSON.parse((await h.rows('helpDocs')).find(r=>r.key==='draft:99').buttonsJson),[]);

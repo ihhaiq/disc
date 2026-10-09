@@ -20,9 +20,11 @@ function markup(row,extra=null){
   return b.length?kb(extra?[...b,...extra.inline_keyboard]:b):extra;
 }
 async function read(key) {return db.select().from(helpDocs).where(eq(helpDocs.key,key)).get();}
-async function put(key,html,buttonsJson='[]',blocksJson=null,isRtl=null){
-  const val={key,html,buttonsJson,blocksJson,isRtl,updatedAt:Math.floor(Date.now()/1000)};
-  await db.insert(helpDocs).values(val).onConflictDoUpdate({target:helpDocs.key,set:val}).run();
+async function put(key,html,buttonsJson='[]',blocksJson=null,isRtl=null,revision=null){
+  const result=await db.run('INSERT INTO vinyl_help_docs (key,html,buttons_json,blocks_json,is_rtl,updated_at,revision) VALUES (:key,:html,:buttons,:blocks,:rtl,:ts,0) ON CONFLICT(key) DO UPDATE SET html = excluded.html, buttons_json = excluded.buttons_json, blocks_json = excluded.blocks_json, is_rtl = excluded.is_rtl, updated_at = excluded.updated_at, revision = vinyl_help_docs.revision + 1 WHERE :revision IS NULL OR vinyl_help_docs.revision = :revision',
+    {':key':key,':html':html,':buttons':buttonsJson,':blocks':blocksJson,':rtl':isRtl,
+      ':ts':Math.floor(Date.now()/1000),':revision':revision});
+  return result.rowsAffected===1;
 }
 export async function sendHelpDoc(message,row,extra=null) {
   const replyMarkup=markup(row,extra);
@@ -35,7 +37,8 @@ export async function sendHelpDoc(message,row,extra=null) {
 async function draft(uid){
   const key='draft:'+uid,r=await read(key);
   if(r)return r;
-  await put(key,'النص');
+  await db.run('INSERT OR IGNORE INTO vinyl_help_docs (key,updated_at) VALUES (:key,:ts)',
+    {':key':key,':ts':Math.floor(Date.now()/1000)});
   return read(key);
 }
 export async function sendHelp(message) {
@@ -63,13 +66,17 @@ export async function helpCallback(c,data){
   if(data==='help_builder:buttons'){
     const r=await draft(uid),b=buttons(r);
     if(!b.length){await reply(c.message,'لا توجد أزرار في المسودة حالياً.',editorMenu);return true;}
-    await reply(c.message,'🗑 اضغط على الزر الذي تريد حذفه:',kb([...b.map((item,i)=>[button('❌ '+item.text.slice(0,40),'help_builder:remove:'+i)]),[button('🔙 رجوع','help_builder:menu')]]));return true;
+    await reply(c.message,'🗑 اضغط على الزر الذي تريد حذفه:',kb([...b.map((item,i)=>[button('❌ '+item.text.slice(0,40),'help_builder:remove:r'+(r.revision||0)+':i'+i)]),[button('🔙 رجوع','help_builder:menu')]]));return true;
   }
   if(data.startsWith('help_builder:remove:')){
-    const raw=data.slice('help_builder:remove:'.length),index=Number(raw),r=await draft(uid),b=buttons(r);
-    if(!/^\d+$/.test(raw)||!Number.isSafeInteger(index)||index<0||index>=b.length){await answer(c,'زر غير موجود',true);return 'answered';}
+    const match=data.match(/^help_builder:remove:r(\d{1,12}):i(\d{1,2})$/),r=await draft(uid),b=buttons(r);
+    if(!match||Number(match[1])!==(r.revision||0)){await answer(c,'القائمة قديمة؛ افتح قائمة حذف الأزرار مرة ثانية.',true);return 'answered';}
+    const index=Number(match[2]);
+    if(index>=b.length){await answer(c,'زر غير موجود',true);return 'answered';}
     b.splice(index,1);
-    await put(r.key,r.html,JSON.stringify(b),r.blocksJson,r.isRtl);
+    if(!await put(r.key,r.html,JSON.stringify(b),r.blocksJson,r.isRtl,r.revision||0)){
+      await answer(c,'تغيّرت المسودة؛ افتح قائمة حذف الأزرار مرة ثانية.',true);return 'answered';
+    }
     await reply(c.message,'✅ تم حذف الزر.',editorMenu);return true;
   }
   if(data==='help_builder:preview'||data==='help_builder:back'){
@@ -98,8 +105,10 @@ export async function helpMessage(message,user) {
     // Keep the original structured Rich Message blocks, not just a text fallback.
     const value=extracted.html||'النص';
     if(value.length>25000||JSON.stringify(extracted.blocks||[]).length>100000){await reply(message,'❌ محتوى المسودة طويل جداً.');return true;}
-    await put(r.key,value,r.buttonsJson,extracted.blocks?JSON.stringify(extracted.blocks):null,
-      typeof extracted.isRtl==='boolean'?Number(extracted.isRtl):null);
+    if(!await put(r.key,value,r.buttonsJson,extracted.blocks?JSON.stringify(extracted.blocks):null,
+      typeof extracted.isRtl==='boolean'?Number(extracted.isRtl):null,r.revision||0)){
+      await reply(message,'تغيّرت المسودة أثناء التحرير؛ أرسل النص مرة ثانية.');return true;
+    }
     await updateUser(uid,{pendingAction:''});
     await reply(message,'✅ تم تحديث نص المسودة.',editorMenu);return true;
   }
@@ -109,7 +118,9 @@ export async function helpMessage(message,user) {
     if(!label||label.length>64||!safeHttpUrl(url)){await reply(message,'❌ الصيغة غلط، أرسل <code>الاسم | https://example.com</code>');return true;}
     const b=buttons(r);if(b.length>=40){await reply(message,'وصلت للحد الأقصى للأزرار.');return true;}
     b.push({text:label,url});
-    await put(r.key,r.html,JSON.stringify(b),r.blocksJson,r.isRtl);
+    if(!await put(r.key,r.html,JSON.stringify(b),r.blocksJson,r.isRtl,r.revision||0)){
+      await reply(message,'تغيّرت المسودة أثناء التحرير؛ أرسل الزر مرة ثانية.');return true;
+    }
     await updateUser(uid,{pendingAction:''});
     await reply(message,'✅ تمت إضافة الزر.',editorMenu);return true;
   }

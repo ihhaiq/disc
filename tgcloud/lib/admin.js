@@ -5,7 +5,7 @@ import { developer, now } from './config.js';
 import { STYLES } from './catalog.js';
 import { developerKeyboard, kb } from './keyboard.js';
 import { tr } from './i18n.js';
-import { updateUser, colorPaid } from './state.js';
+import { updateUser } from './state.js';
 import { reply, edit, answer } from './io.js';
 import { ORIGINAL_AR, ORIGINAL_EN } from './original-texts.js';
 import { escapeHtml, extractMessageContent, normalizeDevText, emojiSyntaxError, normalizeRichMedia } from './dev-text-utils.js';
@@ -64,10 +64,11 @@ async function whitelistView(chatMessage,requested=0){
 async function colorView(chatMessage){
   const rows=[];
   for(const s of STYLES){
-    const paid=await colorPaid(s.key);
+    const entry=await db.select().from(premiumColors).where(eq(premiumColors.key,s.key)).get();
+    const paid=Boolean(entry?.paid),revision=entry?.revision||0;
     rows.push([btn((await tr(s.textKey,'ar'))+' — '+
       (await tr(paid?'BTN_DEV_LIMITS_PAID_SUFFIX':'BTN_DEV_LIMITS_FREE_SUFFIX','ar')),
-      'dev_limits:toggle:'+s.key)]);
+      'dev_limits:set:'+s.key+':r'+revision+':'+(paid?0:1))]);
   }
   rows.push([btn(await tr('BTN_BACK','ar'),'dev_limits:back')]);
   await edit(chatMessage,await tr('MSG_DEV_LIMITS_HEADER','ar'),kb(rows));
@@ -75,12 +76,19 @@ async function colorView(chatMessage){
 export async function developerCallback(c,data){
   const uid=c.from.id;
   if(c.message.chat.type!=='private'||!developer(uid)){await answer(c,await tr('MSG_DEV_ONLY_OPTION','ar'),true);return 'answered';}
-  if(data==='dev_limits:open'||data.startsWith('dev_limits:toggle:')){
-    if(data.startsWith('dev_limits:toggle:')){
-      const key=data.split(':')[2];if(!STYLES.some(x=>x.key===key)){await answer(c,'قرص غير معروف',true);return 'answered';}
-      const paid=await colorPaid(key);
-      await db.insert(premiumColors).values({key,paid:paid?0:1})
-        .onConflictDoUpdate({target:premiumColors.key,set:{paid:paid?0:1}}).run();
+  if(data==='dev_limits:open'||data.startsWith('dev_limits:set:')||data.startsWith('dev_limits:toggle:')){
+    if(data!=='dev_limits:open'){
+      const match=data.match(/^dev_limits:set:([a-z]+):r(\d{1,12}):([01])$/);
+      if(!match||!STYLES.some(x=>x.key===match[1])){
+        await colorView(c.message);await answer(c,'القائمة قديمة أو الخيار غير صحيح؛ استخدم الأزرار المحدّثة.',true);return 'answered';
+      }
+      const [,key,rawRevision,rawPaid]=match,revision=Number(rawRevision),paid=Number(rawPaid);
+      // A button names a desired state and the revision it observed. Replays cannot toggle it back.
+      const result=await db.run('INSERT INTO vinyl_paid_colors (key,paid,revision) SELECT :key,:paid,1 WHERE :revision = 0 OR EXISTS (SELECT 1 FROM vinyl_paid_colors WHERE key = :key) ON CONFLICT(key) DO UPDATE SET paid = excluded.paid, revision = vinyl_paid_colors.revision + 1 WHERE vinyl_paid_colors.revision = :revision',
+        {':key':key,':paid':paid,':revision':revision});
+      if(result.rowsAffected!==1){
+        await colorView(c.message);await answer(c,'هذا الزر قديم؛ حدّثت القائمة بدون تغيير الحالة.',true);return 'answered';
+      }
     }
     await colorView(c.message);return true;
   }

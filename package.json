@@ -9,6 +9,7 @@
     "check": "node scripts/check-serverless.mjs && node --experimental-vm-modules --test tests/serverless/*.test.mjs tests/video/*.test.mjs",
     "check:behavior": "node --experimental-vm-modules --test tests/serverless/flows.test.mjs",
     "prepare:video-probe": "node scripts/prepare-video-probe.mjs",
+    "prepare:legacy-import": "node scripts/prepare-legacy-import.mjs",
     "status": "tgcloud status",
     "deploy": "tgcloud push",
     "migrate": "tgcloud migrate",

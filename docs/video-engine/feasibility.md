@@ -31,6 +31,8 @@ Error: No CLI access token found for this project.
 
 There is no linked Telegram Cloud account in this execution environment. No production commands were executed. The next result required is the real platform probe output from an account enabled for Serverless.
 
+Rechecked the official Serverless page and packaged SDK on 2026-10-09 during the usability follow-up: no documented Canvas, WebCodecs or H.264/AAC encoding interface was found. The managed environment reported current observations with no secrets, runtime credentials or outbound identities. A fresh isolated CLI run again exited with `No CLI access token found for this project`. This blocks platform measurement; it does not establish that encoders are impossible in pure JavaScript. No local Node encoder was substituted for a Telegram result.
+
 ## Pure JavaScript encoding assessment
 
 PNG decoding, alpha composition, rotation and ISO BMFF muxing are individual engineering tasks. Muxing cannot substitute for valid elementary streams. Without working native codecs, a pure JS path would need a verified audio demuxer/decoder and AAC encoder plus a compressed AVC encoder. No such implementation is present or claimed here; no external renderer was introduced.

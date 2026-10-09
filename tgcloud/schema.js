@@ -9,6 +9,7 @@ export const users = table('vinyl_users', {
   used: integer('used').notNull().default(0),
   windowStart: integer('window_start').notNull().default(0),
   premiumUntil: integer('premium_until').notNull().default(0),
+  premiumBaseUntil: integer('premium_base_until').notNull().default(0),
   pendingAction: text('pending_action').notNull().default(''),
 });
 export const whitelist = table('vinyl_whitelist', {
@@ -19,6 +20,7 @@ export const whitelist = table('vinyl_whitelist', {
 export const premiumColors = table('vinyl_paid_colors', {
   key: text('key').primaryKey(),
   paid: integer('paid').notNull().default(1),
+  revision: integer('revision').notNull().default(0),
 });
 export const sessions = table('vinyl_sessions', {
   key: text('key').primaryKey(),
@@ -59,4 +61,5 @@ export const helpDocs = table('vinyl_help_docs', {
   blocksJson: text('blocks_json'),
   isRtl: integer('is_rtl'),
   updatedAt: integer('updated_at').notNull().default(0),
+  revision: integer('revision').notNull().default(0),
 });
