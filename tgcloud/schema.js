@@ -25,6 +25,7 @@ export const sessions = table('vinyl_sessions', {
   ownerId: integer('owner_id').notNull(),
   chatId: integer('chat_id').notNull(),
   messageId: integer('message_id').notNull(),
+  promptId: integer('prompt_id').notNull().default(0),
   audioId: text('audio_id').notNull(),
   duration: integer('duration').notNull().default(0),
   size: integer('size').notNull().default(0),
