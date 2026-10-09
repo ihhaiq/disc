@@ -15,7 +15,7 @@ Do not claim this branch has 1:1 parity until an equivalent renderer is implemen
 
 - `tgcloud/schema.js`: user prefs, daily usage, paid color flags, whitelist, durable sessions, purchase receipts, editable strings and help drafts.
 - `tgcloud/lib/catalog.js`: 13 style identifiers, shadow filenames, disc filenames, custom emoji IDs, special KISS hole size and all 5 rotation options.
-- `tgcloud/lib/i18n.js`: Arabic/English core UI strings and developer-editable text overrides.
+- `tgcloud/lib/i18n.js` and `original-texts.js`: 108 original Arabic and 92 original English text variables, key compatibility, and developer-editable overrides.
 - `tgcloud/lib/keyboard.js`: start/group/deep-link, style/speed/customize and wizard navigation.
 - `tgcloud/lib/state.js`: durable preference/settings access and subscription state.
 - `tgcloud/lib/wizard.js`: audio intake, private/group/channel session keys, preview/final confirmation interface, alternate cover image and minute selection.
@@ -31,10 +31,10 @@ Do not claim this branch has 1:1 parity until an equivalent renderer is implemen
 2. **Blocker:** Disc PNG images are not deployable as executable modules, and no binary renderer consumes them on this branch.
 3. **Missing:** Original worker queue, cancellation of live FFmpeg jobs, render progress and the adaptive bitrate/time-out safeguards.
 4. **Missing:** Legacy rich-message InputRichMessage block/emoji semantics in editable help.
-5. **Missing:** Exact developer screens, menu photo upload, rich-text editing, and all localized text variables (core keys are ported).
+5. **Missing:** Exact developer screens, menu photo upload, rich-text editing, and the full rich-text UI (the complete 200 original text variables have been copied; not all are wired to their original flows).
 6. **Missing:** End-to-end group/channel permission and reply-to-photo cases verified against actual Telegram updates.
 7. **Missing:** Migration of existing JSON state in `data/` to the new database.
-8. **Missing:** Live SDK integration and end-to-end payment webhook/idempotency tests. Static tests do not prove runtime acceptance.
+8. **Missing:** Live SDK integration and end-to-end payment webhook/idempotency tests. Static tests do not prove runtime acceptance. A V8 syntax-only pass on all 16 Serverless JavaScript modules and an import-target check succeeded on 2026-10-09; GitHub Actions run results and real tgcloud SDK tests were not available.
 9. **Missing:** Verified live `tgcloud push`, `migrate` and `run` smoke tests.
 
 ## Local commands
