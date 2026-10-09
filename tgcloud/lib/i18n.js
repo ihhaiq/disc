@@ -2,6 +2,7 @@
 import { db } from 'sdk';
 import { eq } from 'sdk/db';
 import { overrides } from '../schema.js';
+import { ORIGINAL_AR, ORIGINAL_EN } from './original-texts.js';
 export const STR = {
  ar: {
   start: '<b>I\'m making a vinyl Disc 💽🎶</b>\n\n💽 أرسل لي ملف صوتي (audio) يحتوي صورة مصغرة، وراح أرجع لك فيديو قرص دوّار (vinyl) بصورتك وصوتك 💽⚡️\n\n<b>🎶 اختر سرعة دوران القرص:</b>\n<i>هذا لا يغيّر سرعة الصوت أو الملف</i>',
@@ -49,9 +50,31 @@ export const STR = {
   speedLabels: ['Full turn','8 RPM','19 RPM','33 RPM','45 RPM'],
  }
 };
-export function fmt(s, params={}) { if (typeof s !== 'string') return s; return s.replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? '')); }
+export const LEGACY_KEYS=Object.freeze({
+  start:'MSG_START_HELP',choose:'MSG_CHOOSE_MODE',
+  quick:'BTN_QUICK_CREATE',customize:'BTN_CUSTOMIZE',lang:'BTN_LANG',
+  color:'MSG_WIZ_CHOOSE_COLOR',speed:'MSG_WIZ_CHOOSE_SPEED',
+  photo:'MSG_WIZ_CHOOSE_IMAGE',skip:'BTN_WIZ_SKIP_IMAGE',
+  segment:'MSG_WIZ_CHOOSE_SEGMENT',review:'MSG_WIZ_REVIEW',
+  preview:'BTN_WIZ_PREVIEW',full:'BTN_WIZ_CONFIRM_FULL',
+  expired:'MSG_WIZ_EXPIRED',noThumb:'MSG_WIZ_NO_IMAGE_TO_SKIP',
+  quickPhoto:'MSG_QUICK_NEED_IMAGE',buy:'BTN_BUY_STARS',
+  back:'BTN_BACK',cancel:'BTN_CANCEL',wrong:'MSG_WRONG_TYPE',
+  premium:'MSG_COLOR_PREMIUM_ONLY',receipt:'MSG_PAYMENT_SUCCESS_FMT',
+  invalid:'MSG_PAYMENT_INVALID',
+});
+export function fmt(s, params={}) {
+  if (typeof s !== 'string') return s;
+  return s.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^}]+)?\}/g,
+    (_, k) => String(params[k] ?? '{'+k+'}'));
+}
 export async function tr(key, lang='ar', params={}) {
-  const full = lang === 'en' ? 'EN::'+key : key;
-  const row = await db.select().from(overrides).where(eq(overrides.key, full)).get();
-  return fmt(row?.value ?? STR[lang]?.[key] ?? STR.ar[key] ?? key, params);
+  const full=LEGACY_KEYS[key]||key, en=lang==='en';
+  let row=null;
+  for(const target of new Set([en?'EN::'+key:key,en?'EN::'+full:full])){
+    row=await db.select().from(overrides).where(eq(overrides.key,target)).get();
+    if(row)break;
+  }
+  const source=en?ORIGINAL_EN:ORIGINAL_AR;
+  return fmt(row?.value ?? source[full] ?? STR[lang]?.[key] ?? ORIGINAL_AR[full] ?? STR.ar[key] ?? key,params);
 }
