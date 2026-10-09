@@ -7,6 +7,7 @@ import { DEV_MENU, kb } from './keyboard.js';
 import { getUser, updateUser, colorPaid } from './state.js';
 import { reply, edit, answer } from './io.js';
 import { STR } from './i18n.js';
+import { ORIGINAL_AR, ORIGINAL_EN } from './original-texts.js';
 
 const btn=(text,callback_data)=>({text,callback_data});
 export async function devStart(message) {
@@ -87,12 +88,12 @@ export async function adminMessage(message,user){
   }
   if(text.startsWith('/search ')){
     const search=text.slice(8).toLowerCase();
-    const entries=Object.entries(STR.ar).filter(([key,v])=>typeof v==='string'&&(key.toLowerCase().includes(search)||v.toLowerCase().includes(search))).slice(0,30);
+    const entries=Object.entries({...ORIGINAL_AR,...STR.ar}).filter(([key,v])=>typeof v==='string'&&(key.toLowerCase().includes(search)||v.toLowerCase().includes(search))).slice(0,30);
     await reply(message,entries.length?'🔍 نتائج البحث:\n'+entries.map(([k])=>'• <code>'+k+'</code>').join('\n'):'ماكو نتائج.');return true;
   }
   if(text.startsWith('/edit ')){
     const parts=text.split(/\s+/),key=parts[1],lang=parts[2]||'ar';
-    if(!key || !['ar','en'].includes(lang)||!Object.prototype.hasOwnProperty.call(STR[lang],key)){
+    if(!key || !['ar','en'].includes(lang)||!Object.prototype.hasOwnProperty.call(STR[lang],key)&&!Object.prototype.hasOwnProperty.call(lang==='en'?ORIGINAL_EN:ORIGINAL_AR,key)){
       await reply(message,'اكتب /edit start ar مثلاً. استعمل /search لمعرفة المفاتيح.');return true;
     }
     const target=(lang==='en'?'EN::':'')+key;
