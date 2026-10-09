@@ -1,60 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import { harness } from './sdk-harness.mjs';
 
-const source=readFileSync(new URL('../../tgcloud/lib/wizard.js',import.meta.url),'utf8')
- .replace(/^import\s+[\s\S]*?\s+from\s+['"][^'"]+['"];\s*$/gm,'')
- .replace(/\bexport\s+(?=const|function|async|class)/g,'');
-function harness({channel=false}={}){
- const calls=[],session={
-  key:channel?'c-100:11':'u9',ownerId:channel?0:9,chatId:channel?-100:9,
-  messageId:11,promptId:50,style:'default',rotation:'4',duration:30,thumbId:null,
-  step:channel?'photo':'color',createdAt:1,expiresAt:9999999999
- };
- const db={select:()=>({from:()=>({where:()=>({orderBy:()=>({limit:()=>({get:async()=>channel?session:null})})})})})};
- const vars={
-  api:{deleteMessage:async()=>calls.push(['deleteMessage'])}, db,
-  eq:(...args)=>args,and:(...args)=>args,desc:x=>x,
-  sessions:{ownerId:'ownerId',chatId:'chatId',step:'step',promptId:'promptId',createdAt:'createdAt'},
-  CONFIG:{MAX_DURATION_SECONDS:60,RENDERER_ENABLED:false},
-  now:()=>1000,getUser:async()=>({lang:'ar'}),
-  saveSession:async()=>{},getSession:async key=>key===session.key?session:null,
-  patchSession:async(key,patch)=>{assert.equal(key,session.key);Object.assign(session,patch);calls.push(['patch',patch]);},
-  deleteSession:async key=>calls.push(['delete',key]),sessionKey:()=>session.key,
-  canUseColor:async()=>true,limitStatus:async()=>({remaining:3}),
-  tr:async key=>key,modeKeyboard:async()=>({}),colorKeyboard:async()=>({}),
-  speedKeyboard:async()=>({}),photoKeyboard:async()=>({}),segmentKeyboard:async()=>({}),
-  confirmKeyboard:async()=>({}),reply:async()=>({message_id:55}),
-  edit:async(m,text)=>calls.push(['edit',text]),
-  answer:async(c,text)=>calls.push(['answer',text]),
-  send:async()=>({message_id:56}),styleOf:key=>({key}),
-  SPEEDS:['full','8','19','33','45'],rotationSeconds:s=>60/Number(s)
- };
- const api=new Function(...Object.keys(vars),source+';return {callbackWizard,handlePhoto};')(...Object.values(vars));
- return {calls,session,...api};
-}
-test('custom wizard transitions choose color -> speed -> image',async()=>{
- const h=harness(),c={id:'1',from:{id:9},message:{chat:{id:9},message_id:50}};
- assert.equal(await h.callbackWizard(c,h.session,'wiz_color:blue'),true);
- assert.equal(h.session.style,'blue');
- assert.equal(h.session.step,'speed');
- assert.equal(await h.callbackWizard(c,h.session,'wiz_speed:33'),true);
- assert.equal(h.session.step,'photo');
- assert.ok(Math.abs(Number(h.session.rotation)-(60/33))<1e-10);
+test('custom wizard follows actual ESM and durable SQLite transitions',async t=>{
+  const h=await harness();t.after(()=>h.close());
+  await h.dispatchMessage(h.message(9,11,{audio:{file_id:'A',duration:30,thumbnail:{file_id:'T'}}}));
+  let s=await h.state.getSession('u9');
+  const prompt=h.message(9,s.promptId);
+  await h.dispatchCallback(9,'mode:custom',prompt);
+  s=await h.state.getSession('u9');assert.equal(s.step,'color');
+  await h.dispatchCallback(9,'wiz_color:blue',prompt);
+  s=await h.state.getSession('u9');assert.equal(s.style,'blue');assert.equal(s.step,'speed');
+  await h.dispatchCallback(9,'wiz_speed:33',prompt);
+  s=await h.state.getSession('u9');assert.equal(s.step,'photo');assert.equal(Number(s.rotation),60/33);
+  await h.dispatchCallback(9,'wiz_image:skip',prompt);
+  assert.equal((await h.state.getSession('u9')).step,'confirm');
 });
-test('cancel leaves no active session, uses main messages once',async()=>{
- const h=harness(),c={id:'1',from:{id:9},message:{chat:{id:9},message_id:50}};
- assert.equal(await h.callbackWizard(c,h.session,'cancel_queue'),'alert');
- assert.equal(h.calls.filter(e=>e[0]==='delete').length,1);
- assert.ok(h.calls.some(e=>e[1]==='MSG_QUEUE_CANCELED_EDIT'));
- assert.ok(h.calls.some(e=>e[1]==='MSG_QUEUE_CANCELED_ANSWER'));
+
+test('cancel removes the session and answers exactly once with the canonical message',async t=>{
+  const h=await harness();t.after(()=>h.close());
+  await h.dispatchMessage(h.message(9,11,{audio:{file_id:'A',duration:30}}));
+  const s=await h.state.getSession('u9');
+  await h.dispatchCallback(9,'cancel_queue',h.message(9,s.promptId));
+  assert.equal(await h.state.getSession('u9'),null);
+  assert.equal(h.calls.filter(c=>c.method==='answerCallbackQuery').length,1);
+  assert.equal(h.calls.at(-1).args.text,(await h.load('lib/original-texts.js')).ORIGINAL_AR.MSG_QUEUE_CANCELED_ANSWER);
 });
-test('channel cover-photo reply selects matching pending prompt and advances',async()=>{
- const h=harness({channel:true});
- const ok=await h.handlePhoto({chat:{id:-100,type:'channel'},
-  photo:[{file_id:'PHOTO'}],reply_to_message:{message_id:50}});
- assert.equal(ok,true);
- assert.equal(h.session.thumbId,'PHOTO');
- assert.equal(h.session.step,'confirm');
- assert.equal(h.session.promptId,55);
+
+test('channel photo replies advance the matching prompt to confirmation',async t=>{
+  const h=await harness();t.after(()=>h.close());
+  const msg={message_id:11,chat:{id:-100,type:'channel'},audio:{file_id:'A',duration:30}};
+  await (await h.load('handlers/channel_post.js')).default(msg);
+  let s=await h.state.getSession('c-100:11');
+  await h.dispatchCallback(99,'mode:quick:-100:11',{message_id:s.promptId,chat:msg.chat});
+  assert.equal((await h.state.getSession(s.key)).step,'mode');
+  h.members.set('-100:99','administrator');
+  await h.dispatchCallback(99,'mode:quick:-100:11',{message_id:s.promptId,chat:msg.chat});
+  s=await h.state.getSession(s.key);assert.equal(s.step,'photo');
+  await (await h.load('handlers/channel_post.js')).default({message_id:20,chat:msg.chat,
+    photo:[{file_id:'PHOTO'}],reply_to_message:{message_id:s.promptId}});
+  s=await h.state.getSession(s.key);assert.equal(s.thumbId,'PHOTO');assert.equal(s.step,'confirm');
 });

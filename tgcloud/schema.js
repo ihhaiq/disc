@@ -33,6 +33,8 @@ export const sessions = table('vinyl_sessions', {
   style: text('style').notNull().default('default'),
   rotation: text('rotation').notNull().default('4'),
   step: text('step').notNull().default('mode'),
+  mode: text('mode').notNull().default('custom'),
+  revision: integer('revision').notNull().default(0),
   offset: integer('offset').notNull().default(0),
   createdAt: integer('created_at').notNull(),
   expiresAt: integer('expires_at').notNull(),
@@ -46,6 +48,7 @@ export const receipts = table('vinyl_star_receipts', {
 export const overrides = table('vinyl_custom_texts', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
+  richJson: text('rich_json'),
   editorId: integer('editor_id').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });
@@ -54,5 +57,6 @@ export const helpDocs = table('vinyl_help_docs', {
   html: text('html').notNull().default('النص'),
   buttonsJson: text('buttons_json').notNull().default('[]'),
   blocksJson: text('blocks_json'),
+  isRtl: integer('is_rtl'),
   updatedAt: integer('updated_at').notNull().default(0),
 });

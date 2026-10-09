@@ -1,0 +1,30 @@
+# Serverless parity evidence
+
+Local checks load the real ESM modules into independent VM contexts, substitute SDK transport, and execute persistence and compare-and-swap SQL against **real SQLite**. The database DSL adapter is a test substitute, so these checks do not establish compatibility with Telegram's actual SDK. All Telegram runtime and API results remain unverified until the operator runs them.
+
+| Requirement | Local evidence | Telegram result |
+| --- | --- | --- |
+| Original Arabic/English messages | Exact comparisons of 108 AR + 92 EN constants; format precision and HTML-safe parameters | Pending |
+| 13 templates / 5 speeds | Catalog and keyboard tests including KISS ratio 0.39 | Pending |
+| Start/help/language/settings | Routed messages, persisted preferences and photo captions | Pending |
+| Mode/color/speed/image/minute/confirmation | Full SQLite-backed transition tests, conditional cover skip and minute paging | Pending |
+| Cancellation/session expiry | Durable deletion, TTL and cancellation from every stage | Pending |
+| Duplicate/old/concurrent wizard callbacks | Prompt/chat matching and revision compare-and-swap; retry after presentation errors | Pending |
+| Groups/channels | Owner/admin authorization, reply-to-prompt cover matching and private/group separation | Actual chat permissions and update delivery pending |
+| Developer controls | Private authorization, paid style flags, menu image and paginated whitelist | Pending |
+| Text editor | Canonical variable pages, current-value search, markdown/emoji validation and rejected-save behavior | Actual HTML validation pending |
+| Rich text/media/RTL | Blocks retained; input media normalization; SDK request payloads and compatibility fallback | Actual send/edit/media acceptance pending |
+| Help builder | Draft/text/buttons/delete/preview/publish and editor cancellation | Pending |
+| Payment receipts | Validated ownership/currency/amount, unique ledger, duplicate retry and interrupted-credit repair | Actual payment updates pending; sales closed |
+| Usage limit/reset/exemptions | Local SQLite tests; render attempts never charged | Actual successful-render accounting pending |
+| Static module restrictions | Syntax/import checks for every deployable JS module | Actual SDK compilation pending |
+| Runtime capability discovery | Negative and native-support simulations; resource estimates | Blocked: no CLI account |
+| Rotating disc composition / golden pixels | Not implemented in JS | Pending |
+| Real user audio decode/trim/AAC encode | Not implemented in JS | Pending |
+| H.264 encoder / ISO BMFF muxer | Not implemented in JS | Pending |
+| Three/sixty-second output, synchronization | No JS output to inspect | Pending |
+| `sendVideoNote` proof / Gate A / Gate B | No successful test | BLOCKED |
+| Original worker queue/cancellation/progress | No fake jobs introduced while renderer is absent | Pending renderer integration |
+| Migration from Python JSON state | No importer implemented; fresh/additive SQLite schema documented | Pending |
+
+Deliberate differences: minute lists page after 20 minutes; every wizard stage offers cancellation; shared photos require a reply to the current prompt; group/channel flows reach a durable confirmation screen while rendering is unavailable. The full output cannot be called 1:1 or 95% complete based on UI tests.

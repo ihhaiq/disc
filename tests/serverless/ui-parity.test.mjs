@@ -18,11 +18,13 @@ test('developer callbacks and message handling support durable photo and paginat
   assert.match(admin,/dev_text:edit:/);
   assert.match(admin,/__vinyl_menu_photo_id/);
   assert.match(callback,/editMessageCaption/);
-  assert.match(callback,/dev_text:page:/);
+  assert.match(callback,/developerCallback\(c,data\)/);
+  assert.match(admin,/dev_text:page:/);
 });
 test('rich help retains structured blocks and allows deleting draft URL buttons',()=>{
   const help=source('tgcloud/lib/help.js');
-  assert.match(help,/api\.sendRichMessage/);
+  assert.match(help,/deliverRich\(message/);
+  assert.match(source('tgcloud/lib/io.js'),/sendRichMessage/);
   assert.match(help,/blocksJson/);
   assert.match(help,/extractMessageContent\(message\)/);
   assert.match(help,/help_builder:remove:/);

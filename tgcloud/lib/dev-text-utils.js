@@ -3,7 +3,8 @@ export const escapeHtml = input => String(input ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
 
-const safeUrl = url => /^(https?:\/\/|tg:\/\/)[^\s<>"']+$/i.test(String(url||''));
+export const safeUrl = url => /^(https?:\/\/|tg:\/\/)[^\s<>"']+$/i.test(String(url||''));
+export const safeHttpUrl = url => /^https?:\/\/[^\s<>"']+$/i.test(String(url||''));
 function tag(entity) {
   switch(entity.type) {
     case 'bold': return ['<b>','</b>'];
@@ -52,14 +53,63 @@ export function entitiesToHtml(text, entities=[]) {
 
 export function extractMessageContent(message) {
   const r=message?.rich_message;
-  if(typeof r?.html==='string'&&r.html.trim())return {html:r.html,blocks:null,isRtl:r.is_rtl??null};
   if(Array.isArray(r?.blocks)&&r.blocks.length) {
     // Retain original structured blocks. Fallback is only for plain-message clients.
-    const plain=String(message.text??message.caption??'');
+    const plain=String(message.text??message.caption??richTextFallback(r.blocks));
     return {html:entitiesToHtml(plain,message.entities??message.caption_entities),blocks:r.blocks,isRtl:r.is_rtl??null};
   }
+  if(typeof r?.html==='string'&&r.html.trim())return {html:r.html,blocks:null,isRtl:r.is_rtl??null};
   const raw=message?.text??message?.caption;
   if(typeof raw!=='string'||!raw.trim())return null;
   const es=message?.text!=null?message?.entities:message?.caption_entities;
   return {html:Array.isArray(es)&&es.length?entitiesToHtml(raw,es):raw,blocks:null,isRtl:null};
+}
+
+export function richTextFallback(value) {
+  const parts=[];
+  function walk(item) {
+    if(Array.isArray(item)) {for(const child of item)walk(child);return;}
+    if(!item||typeof item!=='object') return;
+    for(const [key,child] of Object.entries(item)) {
+      if(key==='text'&&typeof child==='string')parts.push(child);
+      else if(['caption','summary','title','description','content','items','blocks'].includes(key))walk(child);
+    }
+  }
+  walk(value);
+  return parts.filter(Boolean).join('\n').trim()||(value?'🖼️':'');
+}
+
+export function normalizeRichMedia(value) {
+  if(Array.isArray(value)) return value.map(normalizeRichMedia);
+  if(!value||typeof value!=='object') return value;
+  const result={};
+  for(const [key,child] of Object.entries(value)) {
+    if(key==='photo'&&Array.isArray(child)) {
+      const photos=child.filter(p=>p?.file_id).sort((a,b)=>(b.width||0)*(b.height||0)-(a.width||0)*(a.height||0));
+      result[key]=photos.length?{media:photos[0].file_id}:normalizeRichMedia(child);
+    } else if(['photo','video','animation','audio','voice_note','document'].includes(key)&&child?.file_id) {
+      result[key]={media:child.file_id};
+    } else result[key]=normalizeRichMedia(child);
+  }
+  return result;
+}
+
+export function normalizeDevText(text) {
+  text=String(text??'').replace(/!\[(.+?)\]\(tg:\/\/emoji\?id=(\d+)\)/g,
+    '<tg-emoji emoji-id="$2">$1</tg-emoji>')
+    .replace(/^#{1,6}\s+(.+)$/gm,'<b>$1</b>');
+  // Keep code and HTML attributes out of Markdown processing.
+  return text.split(/(<code>[\s\S]*?<\/code>|<pre>[\s\S]*?<\/pre>|<[^>]+>|`[^`]+`)/g)
+    .map(part=>part.startsWith('<')?part:part.startsWith('`')?'<code>'+escapeHtml(part.slice(1,-1))+'</code>':part
+      .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/__(.+?)__/g,'<b>$1</b>')
+      .replace(/\*(.+?)\*/g,'<i>$1</i>').replace(/_(.+?)_/g,'<i>$1</i>')
+      .replace(/~~(.+?)~~/g,'<s>$1</s>').replace(/<<(.+?)>>/g,'<u>$1</u>')).join('');
+}
+
+export function emojiSyntaxError(text) {
+  const opens=text.match(/<tg-emoji\b[^>]*>/g)||[],closes=text.match(/<\/tg-emoji>/g)||[];
+  if(opens.length!==closes.length) return 'عدد وسوم الإيموجي غير متطابق.';
+  for(const open of opens) if(!/^<tg-emoji\s+emoji-id=["']\d{1,24}["']\s*>$/.test(open)) return 'emoji-id يجب أن يكون آيدي رقمي صحيح.';
+  if(/<tg-emoji[^>]*>\s*<\/tg-emoji>/.test(text)) return 'ضع إيموجي أو نصاً داخل الوسم.';
+  return null;
 }

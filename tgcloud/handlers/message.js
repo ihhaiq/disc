@@ -1,9 +1,9 @@
 import { api } from 'sdk';
 import { CONFIG, developer } from '../lib/config.js';
-import { getUser } from '../lib/state.js';
+import { getUser, getSession, cancelSession } from '../lib/state.js';
 import { tr } from '../lib/i18n.js';
 import { startKeyboard } from '../lib/keyboard.js';
-import { reply } from '../lib/io.js';
+import { reply, replyText } from '../lib/io.js';
 import { audioReceived, handlePhoto } from '../lib/wizard.js';
 import { devStart, adminMessage } from '../lib/admin.js';
 import { sendHelp, helpMessage } from '../lib/help.js';
@@ -29,18 +29,25 @@ export default async function (message) {
     }
     return;
   }
+  const addressed=(message.text||'').match(/^\/\w+@(\w+)(?:\s|$)/);
+  if(addressed&&(await api.getMe()).username?.toLowerCase()!==addressed[1].toLowerCase())return;
   if(/^\/help(?:@\w+)?(?:\s|$)/.test(message.text||'') ||
       /^\/start(?:@\w+)?\s+help(?:\s|$)/.test(message.text||'')) {
     await sendHelp(message);return;
   }
   if(privateChat && /^\/start(?:@\w+)?(?:\s|$)/.test(message.text||'')) {
+    if(!uid)return;
     const user=await getUser(uid),lang=user.lang;
-    const warn=CONFIG.RENDERER_ENABLED?'':'\n\n'+await tr('renderer',lang);
-    await reply(message,(await tr('start',lang))+warn,await startKeyboard(uid,lang));return;
+    await replyText(message,'start',lang,await startKeyboard(uid,lang));return;
   }
   if(privateChat && uid) {
     const user=await getUser(uid);
-    if(message.text==='/dev' && developer(uid)){await devStart(message);return;}
+    if(/^\/dev(?:@\w+)?$/.test(message.text||'') && developer(uid)){await devStart(message);return;}
+    if(/^\/cancel(?:@\w+)?$/.test(message.text||'')) {
+      const session=await getSession('u'+uid);
+      if(session)await cancelSession(session);
+      await replyText(message,session?'MSG_QUEUE_CANCELED_EDIT':'expired',user.lang);return;
+    }
     if(await adminMessage(message,user))return;
     if(await helpMessage(message,user))return;
   }
@@ -52,6 +59,6 @@ export default async function (message) {
   }
   if(privateChat && (message.voice||message.document||message.video)){
     const lang=(await getUser(uid))?.lang||'ar';
-    await reply(message,await tr('wrong',lang));
+    await replyText(message,'wrong',lang);
   }
 }

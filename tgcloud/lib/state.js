@@ -1,6 +1,6 @@
 // No in-memory process globals: each callback may run in a different isolate.
 import { db } from 'sdk';
-import { eq } from 'sdk/db';
+import { eq, and, gt } from 'sdk/db';
 import { users, sessions, whitelist, premiumColors, receipts } from '../schema.js';
 import { CONFIG, now, developer } from './config.js';
 export async function getUser(uid) {
@@ -26,17 +26,19 @@ export async function colorPaid(key) {
 }
 export async function canUseColor(uid, key) { return !(await colorPaid(key)) || await premium(uid); }
 export async function limitStatus(uid) {
+  if (!uid) return {used:0,limit:CONFIG.FREE_DAILY_LIMIT,remaining:Infinity,resetSeconds:86400};
   const user=await getUser(uid), exempt=await isExempt(uid);
-  const start= user.windowStart || now(), elapsed=now()-start;
+  const start=user.windowStart,elapsed=Math.max(0,now()-start);
   const reset=elapsed>=86400;
   const used=reset?0:user.used, limit=await premium(uid)?CONFIG.PREMIUM_DAILY_LIMIT:CONFIG.FREE_DAILY_LIMIT;
   return { used, limit, remaining:exempt?Infinity:Math.max(0,limit-used), resetSeconds:reset?86400:Math.max(0,86400-elapsed) };
 }
 export async function finishUse(uid) {
   // Only call AFTER a successful sendVideoNote. Never bill attempted or failed renders.
-  const u=await getUser(uid), reset=now()-u.windowStart>=86400;
-  await db.update(users).set({used:reset?1:u.used+1,windowStart:reset?now():u.windowStart})
-    .where(eq(users.id,uid)).run();
+  if (!uid || await isExempt(uid)) return;
+  await getUser(uid);
+  const ts=now();
+  await db.run('UPDATE vinyl_users SET used = CASE WHEN :ts - window_start >= 86400 THEN 1 ELSE used + 1 END, window_start = CASE WHEN :ts - window_start >= 86400 THEN :ts ELSE window_start END WHERE id = :uid', {':ts':ts,':uid':uid});
 }
 export function sessionKey(chatId,ownerId,messageId,kind='private') {
   return kind==='private' ? 'u'+ownerId : (kind==='channel'?'c':'g')+chatId+':'+messageId;
@@ -44,17 +46,49 @@ export function sessionKey(chatId,ownerId,messageId,kind='private') {
 export async function getSession(key) {
   const s=await db.select().from(sessions).where(eq(sessions.key,key)).get();
   if (!s) return null;
-  if (s.expiresAt<=now()) { await db.delete(sessions).where(eq(sessions.key,key)).run(); return null; }
+  if (s.expiresAt<=now()) { await cancelSession(s); return null; }
   return s;
 }
 export async function saveSession(data) {
-  await db.insert(sessions).values(data).onConflictDoUpdate({
-    target:sessions.key,
-    set: { ...data },
-  }).run();
+  const columns={key:'key',ownerId:'owner_id',chatId:'chat_id',messageId:'message_id',promptId:'prompt_id',
+    audioId:'audio_id',duration:'duration',size:'size',thumbId:'thumb_id',style:'style',rotation:'rotation',
+    step:'step',mode:'mode',revision:'revision',offset:'offset',createdAt:'created_at',expiresAt:'expires_at'};
+  const keys=Object.keys(data);
+  if(keys.some(key=>!Object.hasOwn(columns,key)))throw new Error('Unknown session field');
+  // Telegram message IDs increase within a chat. A delayed/duplicate intake must not replace newer audio.
+  const params=Object.fromEntries(keys.map(key=>[':'+key,data[key]??null]));
+  const result=await db.run('INSERT INTO vinyl_sessions ('+keys.map(key=>columns[key]).join(',')+') VALUES ('+
+    keys.map(key=>':'+key).join(',')+') ON CONFLICT(key) DO UPDATE SET '+
+    keys.filter(key=>key!=='key').map(key=>columns[key]+' = excluded.'+columns[key]).join(',')+
+    ' WHERE excluded.message_id > vinyl_sessions.message_id',params);
+  return result.rowsAffected===1;
 }
 export async function patchSession(key,patch) {
   await db.update(sessions).set(patch).where(eq(sessions.key,key)).run();
+}
+// Compare-and-swap prevents concurrent callbacks and old prompts changing a new request.
+export async function transitionSession(s, patch) {
+  const result=await db.update(sessions).set({...patch,revision:(s.revision||0)+1})
+    .where(and(eq(sessions.key,s.key),eq(sessions.revision,s.revision||0),
+      eq(sessions.promptId,s.promptId),gt(sessions.expiresAt,now()))).run();
+  return result.rowsAffected===1;
+}
+export async function cancelSession(s) {
+  const result=await db.delete(sessions).where(and(eq(sessions.key,s.key),
+    eq(sessions.revision,s.revision||0),eq(sessions.promptId,s.promptId))).run();
+  return result.rowsAffected===1;
+}
+export async function sessionForPhoto(message) {
+  const uid=message.from?.id||0;
+  if(message.chat.type==='private') {
+    const s=uid?await getSession('u'+uid):null;
+    return s?.chatId===message.chat.id?s:null;
+  }
+  const replyId=message.reply_to_message?.message_id;
+  if(!replyId) return null;
+  const row=await db.select().from(sessions).where(and(eq(sessions.chatId,message.chat.id),
+    eq(sessions.promptId,replyId),eq(sessions.step,'photo'),gt(sessions.expiresAt,now()))).get();
+  return row||null;
 }
 export async function deleteSession(key) { await db.delete(sessions).where(eq(sessions.key,key)).run(); }
 export async function recomputePremium(uid) {

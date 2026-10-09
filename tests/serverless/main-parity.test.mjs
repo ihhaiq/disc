@@ -52,7 +52,7 @@ const keyboard=new Function('api','STYLES','SPEEDS','rotationSeconds','CONFIG',
   );
 test('start and customization keyboard replicate original labels and selection styles',async()=>{
   const start=await keyboard.startKeyboard(5,'en');
-  assert.equal(start.inline_keyboard[0][0].text,'➕ أضفني للمجموعة');
+  assert.equal(start.inline_keyboard[0][0].text,'➕ Add me to a group');
   const speed=await keyboard.speedKeyboard('ar',null,4);
   assert.equal(speed.inline_keyboard[1][0].text,originals.ORIGINAL_AR.SPEED_LABEL_19RPM);
   assert.equal(speed.inline_keyboard[0][0].style,'primary');

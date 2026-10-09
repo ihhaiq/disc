@@ -60,3 +60,13 @@
 - The GitHub Actions runs remain **red** with empty job steps and unavailable log downloads, so actual CI success remains unverified; no valid `npm run check` execution on a checked-out full repository is claimed.
 - **No Telegram Cloud deployment**: environment has no cloud CLI credentials/project login, no Telegram deployment integration and cannot clone/install via outbound network. Renderer still off; no production migration, checkout or replacement of the Python bot.
 - Full detail: `docs/serverless-parity-audit-2026-10-09.md`.
+# 2026-10-09 — Serverless message/state behavior and P0 discovery
+
+- Compared `main` media functions and conversational routes; changed only the `serverless` worktree. The Python renderer and assets remain unchanged.
+- Added session revisions and SQLite compare-and-swap transitions, prompt/chat binding, duplicate audio protection, failed-presentation rollback, cancellation at every stage, and private/group/channel cover isolation.
+- Routed canonical bilingual texts and formatted numeric placeholders correctly. Added Rich Message override persistence, media normalization, RTL, validation before save, caption-aware edits, and compatibility fallbacks that do not conceal rate-limit/network errors.
+- Completed current-value text search, editor cancellation, paginated whitelist access, help drafts/buttons/publishing, and the disabled-sales/payment-receipt paths. Commands addressed to another bot are ignored.
+- Replaced the wizard's source-stripping test harness with real ESM loading and real SQLite. Added end-to-end mocked conversational tests; corrected a stale static assertion that expected developer routing inline instead of delegated to `admin.js`.
+- Added `tgcloud/lib/video/diagnostics.js`, isolated probe-project preparation, P0 feasibility/parity reports and `docs/serverless-testing.md`. An actual CLI run was blocked by missing CLI access credentials; there is no claim of a generated Video Note.
+- Pinned CLI 0.2.0 and added its lockfile; CI runs the same `npm run check` suite as local verification.
+- Verification: 19 deployable modules passed syntax/import checks; all 62 local tests passed, including late older audio updates. Live Telegram SDK/API/permission behavior and video encoding remain pending.

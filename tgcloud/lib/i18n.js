@@ -3,6 +3,7 @@ import { db } from 'sdk';
 import { eq } from 'sdk/db';
 import { overrides } from '../schema.js';
 import { ORIGINAL_AR, ORIGINAL_EN } from './original-texts.js';
+import { escapeHtml } from './dev-text-utils.js';
 export const STR = {
  ar: {
   start: '<b>I\'m making a vinyl Disc 💽🎶</b>\n\n💽 أرسل لي ملف صوتي (audio) يحتوي صورة مصغرة، وراح أرجع لك فيديو قرص دوّار (vinyl) بصورتك وصوتك 💽⚡️\n\n<b>🎶 اختر سرعة دوران القرص:</b>\n<i>هذا لا يغيّر سرعة الصوت أو الملف</i>',
@@ -21,7 +22,7 @@ export const STR = {
   premium:'💎 هذا اللون متاح فقط للمشتركين بالاشتراك المدفوع.',
   denied:'🚫 هذا التحكم متاح فقط لصاحب الطلب أو مشرفي المحادثة.',
   limited:'🚫 وصلت للحد اليومي ({limit} أقراص كل 24 ساعة).\n⏳ راح يتجدد الحد خلال {hours} ساعة تقريبًا.',
-  renderer:'⚠️ تحويل الصوت إلى فيديو نوت والمعاينة غير متاحين على فرع السيرفليس حالياً. لن تُحتسب محاولة أو يُخصم من رصيدك.',
+  renderer:'⚠️ إنشاء الفيديو والمعاينة غير متاحين حالياً. لن تُحتسب محاولة أو يُخصم من رصيدك.',
   receipt:'✅ تم تفعيل الاشتراك بنجاح! حدك اليومي الآن {limit} قرص لكل 24 ساعة.',
   invalid:'❌ تعذر التحقق من بيانات الدفعة. لم يتم تفعيل الاشتراك.',
   size:'❌ الملف أكبر من 20 ميگابايت. أرسل ملفاً أصغر.',
@@ -43,7 +44,7 @@ export const STR = {
   premium:'💎 This disc is available only to subscribers.',
   denied:'🚫 Only the request owner or a chat administrator can control this.',
   limited:'🚫 You reached the daily limit ({limit} discs per 24 hours).\n⏳ It resets in roughly {hours} hours.',
-  renderer:'⚠️ Audio-to-video rendering and previews are not available on this Serverless branch yet. No usage will be charged.',
+  renderer:'⚠️ Video creation and previews are currently unavailable. No usage will be charged.',
   receipt:'✅ Subscription activated! Your daily limit is now {limit} discs every 24 hours.',
   invalid:'❌ Payment validation failed. Subscription was not activated.',
   size:'❌ File exceeds the 20 MB limit. Send a smaller file.',
@@ -62,13 +63,19 @@ export const LEGACY_KEYS=Object.freeze({
   back:'BTN_BACK',cancel:'BTN_CANCEL',wrong:'MSG_WRONG_TYPE',
   premium:'MSG_COLOR_PREMIUM_ONLY',receipt:'MSG_PAYMENT_SUCCESS_FMT',
   invalid:'MSG_PAYMENT_INVALID',
+  size:'MSG_AUDIO_TOO_LARGE_FMT',limited:'MSG_LIMIT_REACHED_FMT',
 });
 export function fmt(s, params={}) {
   if (typeof s !== 'string') return s;
-  return s.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^}]+)?\}/g,
-    (_, k) => String(params[k] ?? '{'+k+'}'));
+  return s.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^}]+))?\}/g,
+    (match,k,spec) => {
+      if(params[k]==null)return match;
+      if(/^\.\d{1,2}f$/.test(spec||'')&&Number.isFinite(Number(params[k])))
+        return Number(params[k]).toFixed(Number(spec.slice(1,-1)));
+      return String(params[k]);
+    });
 }
-export async function tr(key, lang='ar', params={}) {
+export async function textValue(key, lang='ar', params={}) {
   const full=LEGACY_KEYS[key]||key, en=lang==='en';
   let row=null;
   for(const target of new Set([en?'EN::'+key:key,en?'EN::'+full:full])){
@@ -76,5 +83,18 @@ export async function tr(key, lang='ar', params={}) {
     if(row)break;
   }
   const source=en?ORIGINAL_EN:ORIGINAL_AR;
-  return fmt(row?.value ?? source[full] ?? STR[lang]?.[key] ?? ORIGINAL_AR[full] ?? STR.ar[key] ?? key,params);
+  const htmlParams=Object.fromEntries(Object.entries(params).map(([k,v])=>[k,typeof v==='string'?escapeHtml(v):v]));
+  const text=fmt(row?.value ?? source[full] ?? STR[lang]?.[key] ?? ORIGINAL_AR[full] ?? STR.ar[key] ?? key,htmlParams);
+  let rich=null;
+  try {rich=row?.richJson?JSON.parse(row.richJson):null;}catch{}
+  function format(value) {
+    if(typeof value==='string')return fmt(value,params);
+    if(Array.isArray(value))return value.map(format);
+    if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,format(v)]));
+    return value;
+  }
+  const formatted=rich&&typeof rich==='object'?format(rich):null;
+  if(formatted&&typeof rich.html==='string')formatted.html=fmt(rich.html,htmlParams);
+  return {text,rich:formatted};
 }
+export async function tr(key, lang='ar', params={}) {return (await textValue(key,lang,params)).text;}

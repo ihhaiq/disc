@@ -1,19 +1,19 @@
 import { api, db } from 'sdk';
 import { eq } from 'sdk/db';
-import { users, whitelist, premiumColors, overrides } from '../schema.js';
-import { CONFIG, developer, now } from './config.js';
+import { whitelist, premiumColors, overrides } from '../schema.js';
+import { developer, now } from './config.js';
 import { STYLES } from './catalog.js';
-import { DEV_MENU, developerKeyboard, kb } from './keyboard.js';
+import { developerKeyboard, kb } from './keyboard.js';
 import { tr } from './i18n.js';
-import { getUser, updateUser, colorPaid } from './state.js';
+import { updateUser, colorPaid } from './state.js';
 import { reply, edit, answer } from './io.js';
-import { STR } from './i18n.js';
 import { ORIGINAL_AR, ORIGINAL_EN } from './original-texts.js';
-import { escapeHtml, extractMessageContent } from './dev-text-utils.js';
+import { escapeHtml, extractMessageContent, normalizeDevText, emojiSyntaxError, normalizeRichMedia } from './dev-text-utils.js';
 
 const btn=(text,callback_data)=>({text,callback_data});
 export async function devStart(message) {
-  if(!developer(message.from?.id)) return false;
+  if(message.chat.type!=='private'||!developer(message.from?.id)) return false;
+  await updateUser(message.from.id,{pendingAction:''});
   await reply(message,(await tr('MSG_DEV_CHOOSE_TEMPLATE','ar'))+
     '\n\n🔍 <code>/search كلمة</code> — للبحث بأسماء المتغيرات ومحتواها'+
     '\n✏️ <code>/edit VAR_NAME [ar|en]</code> — لتحرير متغيّر مباشرة بالاسم',
@@ -21,7 +21,7 @@ export async function devStart(message) {
   return true;
 }
 const TEXTS_PER_PAGE=5;
-const choices=lang=>Object.entries(lang==='en'?{...ORIGINAL_EN,...STR.en}:{...ORIGINAL_AR,...STR.ar})
+const choices=lang=>Object.entries(lang==='en'?ORIGINAL_EN:ORIGINAL_AR)
   .filter(([k,v])=>!k.startsWith('__')&&typeof v==='string')
   .map(([k])=>k).sort((a,b)=>a.localeCompare(b));
 async function textPage(chatMessage,lang,requested) {
@@ -39,7 +39,7 @@ async function textPage(chatMessage,lang,requested) {
     ') — صفحة '+(page+1)+'/'+(last+1)+' ('+keys.length+' متغيّر):',kb(rows));
 }
 async function editPrompt(message,uid,key,lang){
-  const dict=lang==='en'?{...ORIGINAL_EN,...STR.en}:{...ORIGINAL_AR,...STR.ar};
+  const dict=lang==='en'?ORIGINAL_EN:ORIGINAL_AR;
   if(!Object.hasOwn(dict,key)||typeof dict[key]!=='string')return false;
   const dbKey=lang==='en'?'EN::'+key:key;
   const edited=await db.select().from(overrides).where(eq(overrides.key,dbKey)).get();
@@ -50,13 +50,16 @@ async function editPrompt(message,uid,key,lang){
     (value.length>500?'…':'')+'</code>\n\nأرسل النص أو رسالة Rich جديدة. للإلغاء: /cancel_edit');
   return true;
 }
-async function whitelistView(chatMessage){
+async function whitelistView(chatMessage,requested=0){
   const rows=await db.select().from(whitelist).all();
-  const names=rows.map(x=>x.id);
-  const markup=kb([...names.slice(0,25).map(id=>[btn('❌ إزالة '+id,'dev_whitelist:remove:'+id)]),
+  const names=rows.map(x=>x.id).sort((a,b)=>a-b),last=Math.max(0,Math.ceil(names.length/20)-1),page=Math.min(last,requested);
+  const shown=names.slice(page*20,(page+1)*20),nav=[];
+  if(page>0)nav.push(btn('⬅️ السابق','dev_whitelist:page:'+(page-1)));
+  if(page<last)nav.push(btn('التالي ➡️','dev_whitelist:page:'+(page+1)));
+  const markup=kb([...shown.map(id=>[btn('❌ إزالة '+id,'dev_whitelist:remove:'+id)]),...(nav.length?[nav]:[]),
     [btn('➕ إضافة مستخدم','dev_whitelist:add')],[btn(await tr('BTN_BACK','ar'),'dev_whitelist:back')]]);
   await edit(chatMessage,'🛡️ القائمة البيضاء (مستثناة من كل الحدود اليومية):\n\n'+
-    (names.length?names.map(id=>'• '+id).join('\n'):'لا يوجد أحد حاليًا.'),markup);
+    (names.length?shown.map(id=>'• '+id).join('\n'):'لا يوجد أحد حاليًا.')+'\nصفحة '+(page+1)+'/'+(last+1),markup);
 }
 async function colorView(chatMessage){
   const rows=[];
@@ -71,7 +74,7 @@ async function colorView(chatMessage){
 }
 export async function developerCallback(c,data){
   const uid=c.from.id;
-  if(!developer(uid)){await answer(c,'هذا الخيار للمطور فقط',true);return 'answered';}
+  if(c.message.chat.type!=='private'||!developer(uid)){await answer(c,await tr('MSG_DEV_ONLY_OPTION','ar'),true);return 'answered';}
   if(data==='dev_limits:open'||data.startsWith('dev_limits:toggle:')){
     if(data.startsWith('dev_limits:toggle:')){
       const key=data.split(':')[2];if(!STYLES.some(x=>x.key===key)){await answer(c,'قرص غير معروف',true);return 'answered';}
@@ -81,23 +84,30 @@ export async function developerCallback(c,data){
     }
     await colorView(c.message);return true;
   }
-  if(data==='dev_whitelist:open'||data.startsWith('dev_whitelist:remove:')){
+  if(data==='dev_whitelist:open'||data.startsWith('dev_whitelist:remove:')||data.startsWith('dev_whitelist:page:')){
     if(data.startsWith('dev_whitelist:remove:')){
       const id=Number(data.split(':')[2]);
-      if(Number.isSafeInteger(id)) await db.delete(whitelist).where(eq(whitelist.id,id)).run();
+      if(Number.isSafeInteger(id)&&id>0) await db.delete(whitelist).where(eq(whitelist.id,id)).run();
     }
-    await whitelistView(c.message);return true;
+    let page=0;
+    if(data.startsWith('dev_whitelist:page:')) {
+      const raw=data.slice('dev_whitelist:page:'.length);
+      if(!/^\d{1,5}$/.test(raw)){await answer(c,'صفحة غير صحيحة',true);return 'answered';}
+      page=Number(raw);
+    }
+    await whitelistView(c.message,page);return true;
   }
   if(data==='dev_whitelist:add'){
     await updateUser(uid,{pendingAction:'whitelist'});
     await reply(c.message,'أرسل آيدي المستخدم، أو حوّل رسالة منه مع ظهور هوية المرسل.');return true;
   }
   if(['dev_back','dev_limits:back','dev_whitelist:back','dev_text:back'].includes(data)){
+    await updateUser(uid,{pendingAction:''});
     await edit(c.message,await tr('MSG_DEV_CHOOSE_TEMPLATE','ar'),await developerKeyboard());return true;
   }
   if(data==='vinyl_menu_image:set'){
     await updateUser(uid,{pendingAction:'menu:photo'});
-    await reply(c.message,'🖼 أرسل صورة جديدة لقائمة الأقراص، أو /cancel_edit للإلغاء.');return true;
+    await reply(c.message,await tr('MSG_DEV_SEND_MENU_IMAGE','ar')+'\n/cancel_edit');return true;
   }
   if(data.startsWith('dev_text:page:')){
     const [, ,lang,pageString]=data.split(':');
@@ -108,6 +118,7 @@ export async function developerCallback(c,data){
     const [, ,lang,key]=data.split(':');
     if(!['ar','en'].includes(lang)||!(await editPrompt(c.message,uid,key,lang))){
       await answer(c,'المتغيّر غير موجود',true);
+      return 'answered';
     }
     return true;
   }
@@ -119,9 +130,9 @@ export async function developerCallback(c,data){
 }
 export async function adminMessage(message,user){
   const uid=message.from?.id;
-  if(!developer(uid))return false;
-  const text=String(message.text||'').trim(),action=user?.pendingAction||'';
-  if(text==='/cancel_edit'&&action) {
+  if(message.chat.type!=='private'||!developer(uid))return false;
+  const text=String(message.text||'').trim(),action=/^\/(search|edit)(?:@\w+)?(?:\s|$)/.test(text)?'':user?.pendingAction||'';
+  if(/^\/cancel_edit(?:@\w+)?$/.test(text)&&action) {
     await updateUser(uid,{pendingAction:''});
     await reply(message,'❌ تم إلغاء التحرير.');return true;
   }
@@ -135,7 +146,7 @@ export async function adminMessage(message,user){
     await db.insert(overrides).values({key:'__vinyl_menu_photo_id',value:fileId,editorId:uid,updatedAt:now()})
       .onConflictDoUpdate({target:overrides.key,set:{value:fileId,editorId:uid,updatedAt:now()}}).run();
     await updateUser(uid,{pendingAction:''});
-    await reply(message,'✅ تم حفظ صورة قائمة الأقراص.');return true;
+    await reply(message,await tr('MSG_DEV_MENU_IMAGE_SAVED','ar'));return true;
   }
   if(action==='whitelist'){
     const target=Number(text)||(message.forward_origin?.sender_user?.id)||message.forward_from?.id;
@@ -149,23 +160,41 @@ export async function adminMessage(message,user){
   }
   if(action.startsWith('edit:')){
     const key=action.slice(5),extracted=extractMessageContent(message);
-    const content=extracted?.html||'';
+    const content=extracted?.blocks||message.entities?.length||message.caption_entities?.length||message.rich_message?
+      extracted?.html||'':normalizeDevText(extracted?.html||'');
     if(!content.trim()){await reply(message,'أرسل نصاً أو رسالة Rich صالحة.');return true;}
     if(content.length>25000){await reply(message,'النص طويل جداً (الحد 25,000 حرف).');return true;}
-    await db.insert(overrides).values({key,value:content,editorId:uid,updatedAt:now()})
-      .onConflictDoUpdate({target:overrides.key,set:{value:content,editorId:uid,updatedAt:now()}}).run();
+    const emojiError=extracted?.blocks?null:emojiSyntaxError(content);
+    if(emojiError){await reply(message,'❌ '+emojiError+'\nصحّح النص أو أرسل /cancel_edit.');return true;}
+    const rich=message.rich_message?{...(extracted.blocks?{blocks:extracted.blocks}:{html:content}),
+      ...(typeof extracted.isRtl==='boolean'?{is_rtl:extracted.isRtl}:{})}:null;
+    // Validate with Telegram before saving, retaining the pending edit on rejection.
+    let validation;
+    try {
+      validation=rich?await api.sendRichMessage({chat_id:message.chat.id,rich_message:normalizeRichMedia(rich),disable_notification:true}):
+        await api.sendMessage({chat_id:message.chat.id,text:content,parse_mode:'HTML',disable_notification:true});
+    } catch(error) {
+      if(error?.code!==400)throw error;
+      await reply(message,'❌ النص أو الرسالة الغنية غير مقبولة من تليكرام. صحّحها وأرسلها مرة ثانية، أو /cancel_edit.');return true;
+    }
+    if(validation?.message_id)try{await api.deleteMessage({chat_id:message.chat.id,message_id:validation.message_id});}catch(error){if(error?.code!==400&&error?.code!==403)throw error;}
+    const richJson=rich?JSON.stringify(rich):null;
+    await db.insert(overrides).values({key,value:content,richJson,editorId:uid,updatedAt:now()})
+      .onConflictDoUpdate({target:overrides.key,set:{value:content,richJson,editorId:uid,updatedAt:now()}}).run();
     await updateUser(uid,{pendingAction:''});
     await reply(message,'✅ تم حفظ النص: <code>'+escapeHtml(key)+'</code>');return true;
   }
-  if(text==='/search'||text.startsWith('/search ')){
-    const search=text.slice(7).trim().toLowerCase();
+  if(/^\/search(?:@\w+)?(?:\s|$)/.test(text)){
+    const search=text.replace(/^\/search(?:@\w+)?\s*/,'').trim().toLowerCase();
     if(!search){await reply(message,'استخدم <code>/search كلمة</code> للبحث في نصوص العربية والإنكليزية.');return true;}
     const matches=[];
+    const custom=new Map((await db.select().from(overrides).all()).map(row=>[row.key,row.value]));
     for(const lang of ['ar','en']){
-      const entries=lang==='ar'?{...ORIGINAL_AR,...STR.ar}:{...ORIGINAL_EN,...STR.en};
+      const entries=lang==='ar'?ORIGINAL_AR:ORIGINAL_EN;
       for(const [key,value] of Object.entries(entries)){
-        if(typeof value==='string'&&(key.toLowerCase().includes(search)||value.toLowerCase().includes(search)))
-          matches.push({key,value,lang});
+        const current=custom.get(lang==='en'?'EN::'+key:key)??value;
+        if(typeof current==='string'&&(key.toLowerCase().includes(search)||current.toLowerCase().includes(search)))
+          matches.push({key,value:current,lang});
       }
     }
     const previews=matches.slice(0,15).map(({key,value,lang})=>
@@ -178,8 +207,8 @@ export async function adminMessage(message,user){
       '🔍 لا توجد نتائج لـ <code>'+escapeHtml(search.slice(0,80))+'</code>');
     return true;
   }
-  if(text==='/edit'||text.startsWith('/edit ')){
-    const parts=text.split(/\s+/),key=parts[1],lang=parts[2]||'ar';
+  if(/^\/edit(?:@\w+)?(?:\s|$)/.test(text)){
+    const parts=text.split(/\s+/),key=parts[1],lang=parts[2]?.toLowerCase()||(Object.hasOwn(ORIGINAL_AR,key)?'ar':'en');
     if(!key||!['ar','en'].includes(lang)||!(await editPrompt(message,uid,key,lang))) {
       await reply(message,'اكتب <code>/edit KEY ar</code> أو <code>/edit KEY en</code>. استعمل /search لمعرفة المفاتيح.');
     }

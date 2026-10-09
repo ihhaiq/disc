@@ -3,9 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": { "node": ">=22.13.0" },
   "description": "Telegram Serverless port of the Vinyl Bot Python backend",
   "scripts": {
-    "check": "node scripts/check-serverless.mjs && node --test tests/serverless/*.test.mjs",
+    "check": "node scripts/check-serverless.mjs && node --experimental-vm-modules --test tests/serverless/*.test.mjs tests/video/*.test.mjs",
+    "check:behavior": "node --experimental-vm-modules --test tests/serverless/flows.test.mjs",
+    "prepare:video-probe": "node scripts/prepare-video-probe.mjs",
     "status": "tgcloud status",
     "deploy": "tgcloud push",
     "migrate": "tgcloud migrate",
@@ -13,6 +16,6 @@
     "check:parity": "node --test tests/serverless/main-parity.test.mjs"
   },
   "devDependencies": {
-    "@tgcloud/cli": "^0.2.0"
+    "@tgcloud/cli": "0.2.0"
   }
 }

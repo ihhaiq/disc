@@ -11,7 +11,7 @@ export const ctxData=(data,s)=>s.key.startsWith('u')?data:data+':'+s.chatId+':'+
 export async function startKeyboard(uid,lang) {
   const me=await api.getMe();
   return kb([
-    [{text:'➕ أضفني للمجموعة',url:'https://t.me/'+me.username+'?startgroup=start',style:'primary'}],
+    [{text:lang==='en'?'➕ Add me to a group':'➕ أضفني للمجموعة',url:'https://t.me/'+me.username+'?startgroup=start',style:'primary'}],
     [cb(await tr('lang',lang),'lang:toggle',{style:'success'}),cb(await tr('customize',lang),'customize:open',{style:'danger'})]
   ]);
 }
@@ -19,7 +19,7 @@ export async function speedKeyboard(lang,s=null,selectedRotation=null) {
   const names=await Promise.all(['SPEED_LABEL_FULL','SPEED_LABEL_8RPM',
     'SPEED_LABEL_19RPM','SPEED_LABEL_33RPM','SPEED_LABEL_45RPM'].map(key=>tr(key,lang)));
   const buttons=SPEEDS.map((speed,i)=>cb(names[i]+(String(s?.rotation ?? selectedRotation)===String(rotationSeconds(speed))?' ✅':''),s?ctxData('wiz_speed:'+speed,s):'speed:'+speed,{style:'primary'}));
-  if(s) return kb([buttons.slice(0,2),buttons.slice(2,4),buttons.slice(4)]);
+  if(s) return kb([buttons.slice(0,2),buttons.slice(2,4),buttons.slice(4),[cb(await tr('cancel',lang),ctxData('cancel_queue',s))]]);
   return kb([buttons.slice(0,2),buttons.slice(2,4),buttons.slice(4),[cb(await tr('BTN_VINYL_COLOR_MENU',lang),'vinyl_menu:open',{style:'danger'})],[cb(await tr('back',lang),'customize:back')]]);
 }
 export async function colorKeyboard(uid,lang,s=null) {
@@ -40,6 +40,7 @@ export async function colorKeyboard(uid,lang,s=null) {
   rows.push([{text:await tr('BTN_VINYL_COLOR_PREVIEW',lang),url:'https://t.me/VinylTemplate',
     icon_custom_emoji_id:'5904219717073114606'}]);
   if(!s) rows.push([cb(await tr('back',lang),'vinyl_menu:back')]);
+  else rows.push([cb(await tr('cancel',lang),ctxData('cancel_queue',s))]);
   return kb(rows);
 }
 export async function modeKeyboard(uid,lang,s) {

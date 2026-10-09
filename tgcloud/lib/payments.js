@@ -3,7 +3,8 @@ import { CONFIG } from './config.js';
 import { tr } from './i18n.js';
 export function validatePayment(payload,currency,amount,uid){
   const parts=String(payload||'').split('_');
-  return parts.length===3&&parts[0]==='sub'&&Number(parts[1])===uid&&Number(parts[2])>0&&
+  return parts.length===3&&parts[0]==='sub'&&/^\d+$/.test(parts[1])&&/^\d+$/.test(parts[2])&&
+    Number.isSafeInteger(uid)&&uid>0&&Number(parts[1])===uid&&Number.isSafeInteger(Number(parts[2]))&&Number(parts[2])>0&&
     currency==='XTR'&&amount===CONFIG.STARS_SUBSCRIPTION_PRICE;
 }
 export async function sendInvoice(chatId,uid,lang) {

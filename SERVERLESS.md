@@ -1,5 +1,15 @@
 # Telegram Serverless port — engineering status
 
+## Current status: 2026-10-09 message/state implementation
+
+The message and state routes have now been tested by loading the real ESM modules with a substituted Telegram SDK transport and executing SQL against actual SQLite. This covers start/help/settings, the creation wizard, prompt ownership, stale and concurrent callbacks, group/channel cover replies, cancellation, quota handling, developer editing, Rich Message/media preservation, help publishing, and receipt deduplication. Numeric rendering capability is still unproven.
+
+Read [the Arabic setup and test guide](docs/serverless-testing.md) for CLI 0.2.0, the new additive schema fields, and a manual Telegram test matrix. [Parity evidence](docs/video-engine/parity.md) states the remaining gaps. [P0 feasibility](docs/video-engine/feasibility.md) and the isolated capability-probe generator are implemented; **the video renderer is not**.
+
+`npm run check` now runs syntax/import validation plus parity, SQLite-backed behavior, and diagnostics tests. The CLI is pinned to 0.2.0 with a lockfile. GitHub Actions uses the same command. Node 22.13+ is required for the local SQLite harness; runtime modules still have no Node imports or npm dependencies.
+
+No Telegram deployment/migration or successful Video Note proof was performed. `RENDERER_ENABLED=false`; new Stars sales are closed. Existing valid receipt handling remains durable. The historical sections below describe the earlier source-only checkpoint and are superseded by this paragraph for the messaging work.
+
 This branch retains the original Python implementation from `main` for reference.
 The new Telegram-hosted V8 backend is under `tgcloud/`; `main` is unchanged.
 
