@@ -3,7 +3,8 @@ import { eq } from 'sdk/db';
 import { users, whitelist, premiumColors, overrides } from '../schema.js';
 import { CONFIG, developer, now } from './config.js';
 import { STYLES } from './catalog.js';
-import { DEV_MENU, kb } from './keyboard.js';
+import { DEV_MENU, developerKeyboard, kb } from './keyboard.js';
+import { tr } from './i18n.js';
 import { getUser, updateUser, colorPaid } from './state.js';
 import { reply, edit, answer } from './io.js';
 import { STR } from './i18n.js';
@@ -13,7 +14,10 @@ import { escapeHtml, extractMessageContent } from './dev-text-utils.js';
 const btn=(text,callback_data)=>({text,callback_data});
 export async function devStart(message) {
   if(!developer(message.from?.id)) return false;
-  await reply(message,'🎨 لوحة مطور Vinyl Bot\n\n<code>/search كلمة</code> — البحث في النصوص\n<code>/edit KEY [ar|en]</code> — تعديل نص',DEV_MENU);
+  await reply(message,(await tr('MSG_DEV_CHOOSE_TEMPLATE','ar'))+
+    '\n\n🔍 <code>/search كلمة</code> — للبحث بأسماء المتغيرات ومحتواها'+
+    '\n✏️ <code>/edit VAR_NAME [ar|en]</code> — لتحرير متغيّر مباشرة بالاسم',
+    await developerKeyboard());
   return true;
 }
 const TEXTS_PER_PAGE=5;
@@ -30,7 +34,7 @@ async function textPage(chatMessage,lang,requested) {
   if(page<last)nav.push(btn('التالي ➡️','dev_text:page:'+lang+':'+(page+1)));
   if(nav.length)rows.push(nav);
   rows.push([btn(lang==='en'?'🇮🇶 عربي':'🇬🇧 English','dev_text:page:'+(lang==='en'?'ar':'en')+':0')]);
-  rows.push([btn('🔙 رجوع','dev_back')]);
+  rows.push([btn('🔙 رجوع','dev_text:back')]);
   await edit(chatMessage,'✏️ تحرير النصوص ('+(lang==='en'?'English':'عربي')+
     ') — صفحة '+(page+1)+'/'+(last+1)+' ('+keys.length+' متغيّر):',kb(rows));
 }
@@ -49,17 +53,21 @@ async function editPrompt(message,uid,key,lang){
 async function whitelistView(chatMessage){
   const rows=await db.select().from(whitelist).all();
   const names=rows.map(x=>x.id);
-  const markup=kb([...names.slice(0,25).map(id=>[btn('❌ إزالة '+id,'dev_whitelist:remove:'+id)]),[btn('➕ إضافة مستخدم','dev_whitelist:add')],[btn('🔙 رجوع','dev_back')]]);
-  await edit(chatMessage,'🛡️ القائمة البيضاء (مستثناة من الحدود اليومية):\n\n'+(names.join('\n')||'لا يوجد مستخدمون.'),markup);
+  const markup=kb([...names.slice(0,25).map(id=>[btn('❌ إزالة '+id,'dev_whitelist:remove:'+id)]),
+    [btn('➕ إضافة مستخدم','dev_whitelist:add')],[btn(await tr('BTN_BACK','ar'),'dev_whitelist:back')]]);
+  await edit(chatMessage,'🛡️ القائمة البيضاء (مستثناة من كل الحدود اليومية):\n\n'+
+    (names.length?names.map(id=>'• '+id).join('\n'):'لا يوجد أحد حاليًا.'),markup);
 }
 async function colorView(chatMessage){
   const rows=[];
   for(const s of STYLES){
     const paid=await colorPaid(s.key);
-    rows.push([btn(s.ar+' — '+(paid?'💎':'🆓'),'dev_limits:toggle:'+s.key)]);
+    rows.push([btn((await tr(s.textKey,'ar'))+' — '+
+      (await tr(paid?'BTN_DEV_LIMITS_PAID_SUFFIX':'BTN_DEV_LIMITS_FREE_SUFFIX','ar')),
+      'dev_limits:toggle:'+s.key)]);
   }
-  rows.push([btn('🔙 رجوع','dev_back')]);
-  await edit(chatMessage,'🔒 الأقراص المتوفرة:\nاضغط أي قرص للتبديل بين مجاني ومدفوع.',kb(rows));
+  rows.push([btn(await tr('BTN_BACK','ar'),'dev_limits:back')]);
+  await edit(chatMessage,await tr('MSG_DEV_LIMITS_HEADER','ar'),kb(rows));
 }
 export async function developerCallback(c,data){
   const uid=c.from.id;
@@ -84,7 +92,9 @@ export async function developerCallback(c,data){
     await updateUser(uid,{pendingAction:'whitelist'});
     await reply(c.message,'أرسل آيدي المستخدم، أو حوّل رسالة منه مع ظهور هوية المرسل.');return true;
   }
-  if(data==='dev_back'){await edit(c.message,'🎨 لوحة المطور',DEV_MENU);return true;}
+  if(['dev_back','dev_limits:back','dev_whitelist:back','dev_text:back'].includes(data)){
+    await edit(c.message,await tr('MSG_DEV_CHOOSE_TEMPLATE','ar'),await developerKeyboard());return true;
+  }
   if(data==='vinyl_menu_image:set'){
     await updateUser(uid,{pendingAction:'menu:photo'});
     await reply(c.message,'🖼 أرسل صورة جديدة لقائمة الأقراص، أو /cancel_edit للإلغاء.');return true;
