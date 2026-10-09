@@ -64,7 +64,7 @@ export default async function (c) {
     const key=data.slice(6);
     if(!STYLES.some(x=>x.key===key)){await answer(c,'Invalid style',true);return;}
     if(!(await canUseColor(uid,key))){
-      await answer(c,await tr('premium',lang),true);return;
+      await answer(c,await tr(CONFIG.RENDERER_ENABLED?'premium':'renderer',lang),true);return;
     }
     await updateUser(uid,{style:key});
     await edit(c.message,await tr('color',lang),await colorKeyboard(uid,lang));
