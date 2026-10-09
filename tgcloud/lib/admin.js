@@ -17,8 +17,9 @@ export async function devStart(message) {
   return true;
 }
 const TEXTS_PER_PAGE=5;
-const choices=lang=>Object.keys(lang==='en'?{...ORIGINAL_EN,...STR.en}:{...ORIGINAL_AR,...STR.ar})
-  .filter(k=>!k.startsWith('__')).sort((a,b)=>a.localeCompare(b));
+const choices=lang=>Object.entries(lang==='en'?{...ORIGINAL_EN,...STR.en}:{...ORIGINAL_AR,...STR.ar})
+  .filter(([k,v])=>!k.startsWith('__')&&typeof v==='string')
+  .map(([k])=>k).sort((a,b)=>a.localeCompare(b));
 async function textPage(chatMessage,lang,requested) {
   const keys=choices(lang),last=Math.max(0,Math.ceil(keys.length/TEXTS_PER_PAGE)-1);
   const page=Math.max(0,Math.min(last,requested));
@@ -35,7 +36,7 @@ async function textPage(chatMessage,lang,requested) {
 }
 async function editPrompt(message,uid,key,lang){
   const dict=lang==='en'?{...ORIGINAL_EN,...STR.en}:{...ORIGINAL_AR,...STR.ar};
-  if(!Object.hasOwn(dict,key))return false;
+  if(!Object.hasOwn(dict,key)||typeof dict[key]!=='string')return false;
   const dbKey=lang==='en'?'EN::'+key:key;
   const edited=await db.select().from(overrides).where(eq(overrides.key,dbKey)).get();
   const value=String(edited?.value??dict[key]);
