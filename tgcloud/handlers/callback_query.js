@@ -39,11 +39,11 @@ export default async function (c) {
   const parsed=parseContext(c.data),data=parsed.action;
   if(data.startsWith('dev_')||data==='dev_back'||data==='vinyl_menu_image:set'){
     if(!developer(uid)){await answer(c,'هذا الخيار للمطور فقط',true);return;}
-    if(await developerCallback(c,data))await answer(c);return;
+    if((await developerCallback(c,data))===true)await answer(c);return;
   }
   if(data.startsWith('help_builder:')){
     if(!developer(uid)){await answer(c,'هذا الخيار للمطور فقط',true);return;}
-    if(await helpCallback(c,data))await answer(c);return;
+    if((await helpCallback(c,data))===true)await answer(c);return;
   }
   if(data==='lang:toggle'){
     const next=lang==='ar'?'en':'ar';
