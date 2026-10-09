@@ -23,3 +23,25 @@
 **Change:** corrected the Serverless speed callback to render the newly selected rotation speed instead of the stale pre-update user preference. The preference is still saved through the existing database update path.
 
 **Verification:** source-level review and exact targeted replacement; no live Telegram Serverless test or production deploy was performed. Overall feature parity remains incomplete, especially FFmpeg/Pillow rendering. Main was not modified.
+
+## 2026-10-09 — Agent plan, developer panel, rich help and usability parity
+
+**Scope:** `serverless` branch ONLY; `main` unchanged.
+
+### Added
+- `AGENTS.md` and `AGENTS_VIDEO_ENGINE.md` with a gated plan for a native JavaScript engine: runtime feasibility proof, video encoder/muxer proof, golden-frame/audio checks, 13 templates, all speeds and durations, 3-second preview and 60-second Video Note; forbid silently introducing external hosting.
+- `tgcloud/lib/dev-text-utils.js` plus unit tests: Telegram UTF-16 entity offsets, nested bold/italic, safe link markup, custom emoji, Rich Message extraction and preservation of blocks.
+- Reworked developer UI: original 13-disc menu, Arabic/English text-variable pages, value previews, bilingual `/search` and `/edit`, validation and HTML escaping. Disallowed editing non-string label arrays.
+- Developer menu-photo upload stored in SQLite-backed overrides, displayed in disc color menu; photo caption can be edited when switching language or choosing a disc.
+- `/help` draft editing preserves Telegram rich blocks (when supplied) and attempts `sendRichMessage` with HTML compatibility fallback. Added button removal in the draft.
+- Long-audio minute choice now has pages; missing-thumbnail prompts no longer display a nonfunctional Skip button.
+
+### Fixes
+- Avoid duplicate callback acknowledgements for developer/help alerts.
+- Fall back to safe escaped text for malformed HTML in developer-customizable message paths.
+- Preserve correct selected speed and selection markers in the main settings keyboard.
+
+### Verification and remaining gaps
+- Checked JavaScript syntax for affected modules by compiling their bodies in an isolated V8 engine after stripping ESM wrappers (NOT a runtime SDK test).
+- Executed targeted pure-function assertions for nested Telegram formatting, emoji offsets, unsafe URLs and rich-block capture. Tests were also committed for Node CI; successful CI execution was not observed here.
+- Still **not 100%**: FFmpeg/Pillow replacement and actual Video Notes absent; exact rich-message editing of all variables, legacy JSON migration, end-to-end tests, production SDK integration, group/channel flows and Stars webhook tests remain. No `tgcloud push` or production database migration was performed.
