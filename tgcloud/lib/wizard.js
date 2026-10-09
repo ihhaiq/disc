@@ -93,6 +93,13 @@ export async function callbackWizard(c,s,data) {
     if(!s.thumbId){await answer(c,await tr('noThumb',lang),true);return 'alert';}
     await advance(s,lang);return true;
   }
+  if(data.startsWith('wiz_segment_page:')&&s.step==='segment'){
+    const page=Number(data.slice('wiz_segment_page:'.length));
+    const total=Math.ceil(Math.max(1,Math.ceil(s.duration/60))/20);
+    if(!Number.isSafeInteger(page)||page<0||page>=total)return true;
+    await edit(chatMsg,await tr('segment',lang),await segmentKeyboard(uid,lang,s,page));
+    return true;
+  }
   if(data.startsWith('wiz_segment:')&&s.step==='segment'){
     const offset=Number(data.split(':')[1]);
     if(!Number.isInteger(offset)||offset<0||offset>=s.duration||offset%60!==0)return true;
