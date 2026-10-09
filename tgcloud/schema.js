@@ -9,6 +9,7 @@ export const users = table('vinyl_users', {
   used: integer('used').notNull().default(0),
   windowStart: integer('window_start').notNull().default(0),
   premiumUntil: integer('premium_until').notNull().default(0),
+  pendingAction: text('pending_action').notNull().default(''),
 });
 export const whitelist = table('vinyl_whitelist', {
   id: integer('id').primaryKey(),
