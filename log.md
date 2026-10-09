@@ -17,3 +17,9 @@
 **Payment safety:** immutable Telegram Stars receipts are deduplicated; user premium expiry can be reconciled from recorded receipts, including after an interrupted request. New invoices and pre-checkout are still rejected until rendering is genuinely supported.
 
 **Validation:** the V8 JavaScript parser accepted all 16 deployable modules after stripping ESM import/export wrappers for syntax-only analysis; all relative imports resolved to files in the branch. The static CI workflow was committed but no successful runner result or live SDK execution was observed. No claim of 1:1 parity or successful Telegram deployment.
+
+## 2026-10-09 — Speed selection UI bug fix
+
+**Change:** corrected the Serverless speed callback to render the newly selected rotation speed instead of the stale pre-update user preference. The preference is still saved through the existing database update path.
+
+**Verification:** source-level review and exact targeted replacement; no live Telegram Serverless test or production deploy was performed. Overall feature parity remains incomplete, especially FFmpeg/Pillow rendering. Main was not modified.
