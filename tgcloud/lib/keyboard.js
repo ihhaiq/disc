@@ -43,11 +43,24 @@ export async function modeKeyboard(uid,lang,s) {
   return kb([[cb(await tr('quick',lang),ctxData('mode:quick',s))],[cb(await tr('customize',lang),ctxData('mode:custom',s))],[cb(await tr('cancel',lang),ctxData('cancel_queue',s))]]);
 }
 export async function photoKeyboard(uid,lang,s) {
-  return kb([[cb(await tr('skip',lang),ctxData('wiz_image:skip',s))],[cb(await tr('cancel',lang),ctxData('cancel_queue',s))]]);
+  const rows=[];
+  if(s.thumbId) rows.push([cb(await tr('skip',lang),ctxData('wiz_image:skip',s))]);
+  rows.push([cb(await tr('cancel',lang),ctxData('cancel_queue',s))]);
+  return kb(rows);
 }
-export async function segmentKeyboard(uid,lang,s) {
-  const n=Math.min(20,Math.ceil(s.duration/60)),rows=[];
-  for(let i=0;i<n;i+=3) rows.push([i,i+1,i+2].filter(k=>k<n).map(k=>cb((lang==='en'?'⏱ Minute ':'⏱ الدقيقة ')+(k+1),ctxData('wiz_segment:'+(k*60),s),{style:'success'})));
+export async function segmentKeyboard(uid,lang,s,page=0) {
+  const n=Math.max(1,Math.ceil(s.duration/60)),totalPages=Math.ceil(n/20);
+  const p=Math.max(0,Math.min(totalPages-1,Math.floor(page)));
+  const start=p*20,end=Math.min(n,start+20),rows=[];
+  for(let i=start;i<end;i+=3)
+    rows.push([i,i+1,i+2].filter(k=>k<end).map(k=>
+      cb((lang==='en'?'⏱ Minute ':'⏱ الدقيقة ')+(k+1),
+        ctxData('wiz_segment:'+(k*60),s),{style:'success'})));
+  const nav=[];
+  if(p>0)nav.push(cb(lang==='en'?'⬅️ Previous':'⬅️ السابق',ctxData('wiz_segment_page:'+(p-1),s)));
+  if(p<totalPages-1)nav.push(cb(lang==='en'?'Next ➡️':'التالي ➡️',ctxData('wiz_segment_page:'+(p+1),s)));
+  if(nav.length)rows.push(nav);
+  rows.push([cb(await tr('cancel',lang),ctxData('cancel_queue',s))]);
   return kb(rows);
 }
 export async function confirmKeyboard(uid,lang,s) {
