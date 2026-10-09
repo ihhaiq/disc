@@ -17,7 +17,8 @@ export async function isExempt(uid) {
   return developer(uid) || !!(await db.select().from(whitelist).where(eq(whitelist.id, uid)).get());
 }
 export async function premium(uid) {
-  return await isExempt(uid) || (await getUser(uid))?.premiumUntil > now();
+  if(await isExempt(uid))return true;
+  return (await recomputePremium(uid)) > now();
 }
 export async function colorPaid(key) {
   const entry=await db.select().from(premiumColors).where(eq(premiumColors.key, key)).get();
