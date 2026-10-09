@@ -45,3 +45,8 @@
 - Checked JavaScript syntax for affected modules by compiling their bodies in an isolated V8 engine after stripping ESM wrappers (NOT a runtime SDK test).
 - Executed targeted pure-function assertions for nested Telegram formatting, emoji offsets, unsafe URLs and rich-block capture. Tests were also committed for Node CI; successful CI execution was not observed here.
 - Still **not 100%**: FFmpeg/Pillow replacement and actual Video Notes absent; exact rich-message editing of all variables, legacy JSON migration, end-to-end tests, production SDK integration, group/channel flows and Stars webhook tests remain. No `tgcloud push` or production database migration was performed.
+
+### Final command routing and regression checks (2026-10-09)
+- Restricted `/help` and `/start` routing to exact Telegram commands rather than accepting `/helper` or `/startfoo` prefixes; preserves the `/start help` deep link.
+- Added `tests/serverless/ui-parity.test.mjs` to guard developer UI, stored disc menu photo, rich help, paginated minute selection, and inactive payment gate.
+- Reviewed all 17 `tgcloud/*.js` modules on the branch with isolated V8 syntax compilation and cross-checked all relative imports; **0 syntax or missing-import errors** in this check. This does not substitute for production execution or the GitHub Actions runner.
