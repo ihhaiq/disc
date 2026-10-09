@@ -1,0 +1,24 @@
+name: Serverless static checks
+on:
+  push:
+    branches: [serverless]
+  pull_request:
+    paths:
+      - 'tgcloud/**'
+      - 'tests/serverless/**'
+      - 'package.json'
+      - '.github/workflows/serverless-check.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check all Telegram modules
+        run: find tgcloud -name '*.js' -print0 | xargs -0 -n 1 node --check
+      - name: Run serverless unit and architecture tests
+        run: node --test tests/serverless/*.test.mjs
