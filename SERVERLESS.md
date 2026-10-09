@@ -47,3 +47,7 @@ The preparation commands only create local artifacts. The temporary import handl
 [AGENTS_VIDEO_ENGINE.md](AGENTS_VIDEO_ENGINE.md) requires video generation inside Telegram V8 and forbids silently introducing an external renderer. An external Python/FFmpeg worker could retain the reference output while bot interactions and SQLite stay on Telegram Serverless, but changes that requirement and needs the user's choice. None has been added or provisioned.
 
 The official reference remains [Telegram Serverless](https://blogfork.telegram.org/bots/serverless). Historical investigation and checkpoints are retained in `log.md` and the dated audit documents; this file describes the current implementation.
+
+## 2026-10-10 local follow-up
+
+Windows test path handling was corrected (developer config injection and file URL conversion). POSIX permission-bit assertions are limited to POSIX platforms; Windows ACL behavior is not claimed verified. All 80 local tests and 20-module checks passed on Linux, not on a Windows runner. A fresh isolated platform probe still stopped before execution because no CLI access token is configured in the managed environment. Rendering and live Telegram parity remain unverified.

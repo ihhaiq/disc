@@ -82,3 +82,9 @@
 - New fields are additive only: `vinyl_users.premium_base_until`, `vinyl_paid_colors.revision`, `vinyl_help_docs.revision`. Production schema migration was not performed.
 - Added migration and replay/concurrency tests, including deliberate late subscription writes and interrupted import retry. Updated setup/import/parity/feasibility documentation and removed obsolete current-status statements from SERVERLESS.md.
 - Verification: `npm run check` passed 20 runtime modules and 80 tests; `git diff --check` passed. Actual Telegram SDK/import/API behavior and video rendering remain unverified. The branch cannot yet be used to generate videos.
+
+## 2026-10-10 — Windows test compatibility and live runtime recheck
+
+Fixed developer configuration injection in the SDK harness to use path.basename, supporting both Windows and POSIX separators. Converted file URLs with fileURLToPath before spawning the legacy import generator, preventing Windows C:\C:\ paths. POSIX mode assertions remain enforced on POSIX; Windows uses ACLs, so the test does not equate mode bits with access control. No bot runtime behavior, renderer gate, payments or production deployment changed.
+
+Validation: npm ci --ignore-scripts; npm run check: 20 deployable modules, 80 tests passed on Linux/Node 24.19.0. No Windows execution environment was available; a native Windows rerun is still needed. An isolated diagnostic project was prepared and tgcloud run exited with No CLI access token found for this project. Current managed environment has no TGCLOUD_TOKEN binding. Video generation remains blocked at platform measurement/Gate A; no encoded Video Note is claimed.

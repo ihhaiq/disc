@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { buildLegacyPlan, legacySql } from '../../scripts/lib/legacy-plan.mjs';
 import { executeImportBatch } from '../../tgcloud/lib/import-batch.js';
@@ -110,18 +111,22 @@ test('generator creates private review artifacts without changing sources or ove
   const input=join(root,'data'),output=join(root,'review');mkdirSync(input);
   const original=JSON.stringify(fixture().usage);writeFileSync(join(input,'usage_limits.json'),original);
   const script=new URL('../../scripts/prepare-legacy-import.mjs',import.meta.url);
-  const report=JSON.parse(execFileSync(process.execPath,[script.pathname,input,output],{encoding:'utf8'}));
+  const report=JSON.parse(execFileSync(process.execPath,[fileURLToPath(script),input,output],{encoding:'utf8'}));
   assert.equal(report.counts.users,1);assert.equal(report.missingFiles.length,2);
   assert.equal(readFileSync(join(input,'usage_limits.json'),'utf8'),original);
-  assert.equal(statSync(output).mode&0o777,0o700);assert.equal(statSync(join(output,'plan.json')).mode&0o777,0o600);
+  // Windows uses ACLs rather than POSIX owner permission bits.
+  if(process.platform!=='win32') {
+    assert.equal(statSync(output).mode&0o777,0o700);
+    assert.equal(statSync(join(output,'plan.json')).mode&0o777,0o600);
+  }
   assert.equal(existsSync(join(output,'tgcloud/handlers/message.js')),true);
-  assert.throws(()=>execFileSync(process.execPath,[script.pathname,input,output],{stdio:'pipe'}));
+  assert.throws(()=>execFileSync(process.execPath,[fileURLToPath(script),input,output],{stdio:'pipe'}));
 });
 test('malformed JSON generation produces no artifacts or source content in errors',t=>{
   const root=mkdtempSync(join(tmpdir(),'vinyl-import-bad-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
   const input=join(root,'data'),output=join(root,'review');mkdirSync(input);
   writeFileSync(join(input,'usage_limits.json'),'{ PRIVATE_SONG_TITLE');
-  try {execFileSync(process.execPath,[new URL('../../scripts/prepare-legacy-import.mjs',import.meta.url).pathname,input,output],{stdio:'pipe'});assert.fail();}
+  try {execFileSync(process.execPath,[fileURLToPath(new URL('../../scripts/prepare-legacy-import.mjs',import.meta.url)),input,output],{stdio:'pipe'});assert.fail();}
   catch(error){assert.doesNotMatch(error.stderr.toString(),/PRIVATE_SONG_TITLE/);}
   assert.equal(existsSync(output),false);
 });

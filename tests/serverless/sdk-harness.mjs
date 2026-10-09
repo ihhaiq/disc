@@ -2,7 +2,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { SourceTextModule, SyntheticModule, createContext } from 'node:vm';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, basename } from 'node:path';
 
 export async function harness({developerId=99,now=1800000000}={}) {
   const database=new DatabaseSync(':memory:'),calls=[],failures=new Map(),members=new Map();
@@ -75,7 +75,7 @@ export async function harness({developerId=99,now=1800000000}={}) {
   function moduleFor(path) {
     if(cache.has(path))return cache.get(path);
     let source=readFileSync(path,'utf8');
-    if(path.endsWith('/config.js'))source=source.replace('DEVELOPER_ID: 0','DEVELOPER_ID: '+developerId);
+    if(basename(path)==='config.js')source=source.replace('DEVELOPER_ID: 0','DEVELOPER_ID: '+developerId);
     const module=new SourceTextModule(source,{context,identifier:path});cache.set(path,module);return module;
   }
   async function load(relative) {
