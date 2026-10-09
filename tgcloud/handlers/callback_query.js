@@ -24,6 +24,14 @@ async function controller(c,session) {
     return ['administrator','creator'].includes(x.status);
   }catch {return false;}
 }
+async function editColorMenu(message,uid,lang) {
+  const text=await tr('color',lang),keyboard=await colorKeyboard(uid,lang);
+  if(message.photo?.length) {
+    return api.editMessageCaption({chat_id:message.chat.id,message_id:message.message_id,
+      caption:text,parse_mode:'HTML',reply_markup:keyboard});
+  }
+  return edit(message,text,keyboard);
+}
 export default async function (c) {
   if(!c?.id||!c?.from||!c?.data||!c.message)return;
   const uid=c.from.id;
@@ -42,7 +50,7 @@ export default async function (c) {
     await updateUser(uid,{lang:next});
     const keys=c.message.reply_markup?.inline_keyboard?.flat().map(x=>x.callback_data)||[];
     if(keys.some(x=>x?.startsWith('vinyl:')))
-      await edit(c.message,await tr('color',next),await colorKeyboard(uid,next));
+      await editColorMenu(c.message,uid,next);
     else if(keys.some(x=>x?.startsWith('speed:')))
       await edit(c.message,await tr('customize',next),await speedKeyboard(next,null,u.rotation));
     else await edit(c.message,await tr('start',next)+(CONFIG.RENDERER_ENABLED?'':'\n\n'+await tr('renderer',next)),await startKeyboard(uid,next));
@@ -85,7 +93,7 @@ export default async function (c) {
       await answer(c,await tr(CONFIG.RENDERER_ENABLED?'premium':'renderer',lang),true);return;
     }
     await updateUser(uid,{style:key});
-    await edit(c.message,await tr('color',lang),await colorKeyboard(uid,lang));
+    await editColorMenu(c.message,uid,lang);
     await answer(c,lang==='en'?'Saved':'✅ تم حفظ الاختيار');return;
   }
   if(data.startsWith('speed:')){
