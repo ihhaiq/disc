@@ -49,7 +49,7 @@ export const STR = {
   speedLabels: ['Full turn','8 RPM','19 RPM','33 RPM','45 RPM'],
  }
 };
-export function fmt(s, params={}) { return s.replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? '')); }
+export function fmt(s, params={}) { if (typeof s !== 'string') return s; return s.replace(/\{(\w+)\}/g, (_, k) => String(params[k] ?? '')); }
 export async function tr(key, lang='ar', params={}) {
   const full = lang === 'en' ? 'EN::'+key : key;
   const row = await db.select().from(overrides).where(eq(overrides.key, full)).get();
