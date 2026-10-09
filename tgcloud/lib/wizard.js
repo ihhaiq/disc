@@ -21,14 +21,15 @@ export async function audioReceived(message,kind='private') {
   const key=sessionKey(message.chat.id,owner,message.message_id,kind);
   const user=uid?await getUser(uid):null;
   const s={
-    key,ownerId:owner,chatId:message.chat.id,messageId:message.message_id,
+    key,ownerId:owner,chatId:message.chat.id,messageId:message.message_id,promptId:0,
     audioId:audio.file_id,duration:audio.duration || 0,size:audio.file_size||0,
     thumbId:audio.thumbnail?.file_id || audio.thumb?.file_id || null,
     style:user?.style||'default',rotation:user?.rotation||'4',
     step:'mode',offset:0,createdAt:now(),expiresAt:now()+CONFIG.SESSION_TTL_SECONDS
   };
   await saveSession(s);
-  await reply(message,await tr('choose',lang),await modeKeyboard(uid,lang,s));
+  const prompt=await reply(message,await tr('choose',lang),await modeKeyboard(uid,lang,s));
+  if(prompt?.message_id) await patchSession(key,{promptId:prompt.message_id});
 }
 export async function handlePhoto(message) {
   if(!message.photo?.length)return false;
@@ -40,7 +41,7 @@ export async function handlePhoto(message) {
     s=await getSession('g'+message.chat.id+':'+message.reply_to_message.message_id);
   }
   if(!s && ['group','supergroup'].includes(message.chat.type)) {
-    const recent=await db.select().from(sessions).where(and(eq(sessions.ownerId,uid),eq(sessions.chatId,message.chat.id),eq(sessions.step,'photo')))
+    const recent=await db.select().from(sessions).where(and(eq(sessions.ownerId,uid),eq(sessions.chatId,message.chat.id),eq(sessions.step,'photo'),eq(sessions.promptId,message.reply_to_message?.message_id||0)))
       .orderBy(desc(sessions.createdAt)).limit(1).get();
     if(recent) s=await getSession(recent.key);
   }
@@ -61,7 +62,8 @@ export async function advance(s,lang,message=null) {
     text=await tr('review',lang);markup=await confirmKeyboard(s.ownerId,lang,s);step='confirm';
   }
   await patchSession(s.key,{step});
-  if(message)await reply(message,text,markup);else await send(s.chatId,text,markup);
+  const prompt=message?await reply(message,text,markup):await send(s.chatId,text,markup);
+  if(prompt?.message_id)await patchSession(s.key,{promptId:prompt.message_id});
 }
 export async function callbackWizard(c,s,data) {
   const uid=c.from.id,lang=(await getUser(uid))?.lang||'ar', chatMsg=c.message;
