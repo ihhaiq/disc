@@ -1,6 +1,6 @@
 // Durable wizard transitions, no long-running jobs in isolates.
 import { CONFIG, now } from './config.js';
-import { db } from 'sdk';
+import { db, api } from 'sdk';
 import { eq, and, desc } from 'sdk/db';
 import { sessions } from '../schema.js';
 import { getUser, saveSession, getSession, patchSession, deleteSession, sessionKey, canUseColor, limitStatus } from './state.js';
@@ -34,9 +34,11 @@ export async function audioReceived(message,kind='private') {
 export async function handlePhoto(message) {
   if(!message.photo?.length)return false;
   const uid=message.from?.id || message.from_user?.id || 0;
-  if(!uid)return false;
-  // One personal context or the latest active group session from the same sender.
-  let s=await getSession('u'+uid);
+  const channel=message.chat?.type==='channel';
+  if(!uid&&!channel)return false;
+  // Private: one session/user. Groups and channels: the reply must point
+  // to the bot's prompt, never to another user's pending audio.
+  let s=channel?null:await getSession('u'+uid);
   if(!s && message.reply_to_message?.message_id) {
     s=await getSession('g'+message.chat.id+':'+message.reply_to_message.message_id);
   }
@@ -44,6 +46,13 @@ export async function handlePhoto(message) {
     const recent=await db.select().from(sessions).where(and(eq(sessions.ownerId,uid),eq(sessions.chatId,message.chat.id),eq(sessions.step,'photo'),eq(sessions.promptId,message.reply_to_message?.message_id||0)))
       .orderBy(desc(sessions.createdAt)).limit(1).get();
     if(recent) s=await getSession(recent.key);
+  }
+  if(!s && channel && message.reply_to_message?.message_id) {
+    const recent=await db.select().from(sessions).where(and(
+      eq(sessions.ownerId,0),eq(sessions.chatId,message.chat.id),
+      eq(sessions.step,'photo'),eq(sessions.promptId,message.reply_to_message.message_id)
+    )).orderBy(desc(sessions.createdAt)).limit(1).get();
+    if(recent)s=await getSession(recent.key);
   }
   if(!s || s.step!=='photo')return false;
   const lang=(await getUser(uid))?.lang||'ar';
@@ -67,7 +76,15 @@ export async function advance(s,lang,message=null) {
 }
 export async function callbackWizard(c,s,data) {
   const uid=c.from.id,lang=(await getUser(uid))?.lang||'ar', chatMsg=c.message;
-  if(data==='cancel_queue'){await deleteSession(s.key);await edit(chatMsg,await tr('expired',lang));return true;}
+  if(data==='cancel_queue'){
+    await deleteSession(s.key);
+    if(s.key.startsWith('g')){
+      try {await api.deleteMessage({chat_id:s.chatId,message_id:chatMsg.message_id});}
+      catch {await edit(chatMsg,await tr('MSG_QUEUE_CANCELED_EDIT',lang));}
+    }else await edit(chatMsg,await tr('MSG_QUEUE_CANCELED_EDIT',lang));
+    await answer(c,await tr('MSG_QUEUE_CANCELED_ANSWER',lang));
+    return 'alert';
+  }
   if(data==='mode:quick'){
     if(!s.thumbId){await patchSession(s.key,{step:'photo'});await edit(chatMsg,await tr('quickPhoto',lang),await photoKeyboard(uid,lang,s));return true;}
     await advance(s,lang);return true;
