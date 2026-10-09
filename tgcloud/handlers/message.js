@@ -29,10 +29,11 @@ export default async function (message) {
     }
     return;
   }
-  if(message.text?.startsWith('/help')||(message.text?.startsWith('/start') && /^\/start(?:@\w+)?\s+help\b/.test(message.text))) {
+  if(/^\/help(?:@\w+)?(?:\s|$)/.test(message.text||'') ||
+      /^\/start(?:@\w+)?\s+help(?:\s|$)/.test(message.text||'')) {
     await sendHelp(message);return;
   }
-  if(privateChat && message.text?.startsWith('/start')) {
+  if(privateChat && /^\/start(?:@\w+)?(?:\s|$)/.test(message.text||'')) {
     const user=await getUser(uid),lang=user.lang;
     const warn=CONFIG.RENDERER_ENABLED?'':'\n\n'+await tr('renderer',lang);
     await reply(message,(await tr('start',lang))+warn,await startKeyboard(uid,lang));return;
