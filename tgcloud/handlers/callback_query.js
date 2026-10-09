@@ -24,8 +24,9 @@ async function controller(c,session) {
     return ['administrator','creator'].includes(x.status);
   }catch {return false;}
 }
+const settingsTitle=lang=>lang==='en'?'⚙️ Customize your disc settings:':'⚙️ تخصيص إعدادات القرص:';
 async function editColorMenu(message,uid,lang) {
-  const text=await tr('color',lang),keyboard=await colorKeyboard(uid,lang);
+  const text=await tr('MSG_VINYL_COLOR_INFO',lang),keyboard=await colorKeyboard(uid,lang);
   if(message.photo?.length) {
     return api.editMessageCaption({chat_id:message.chat.id,message_id:message.message_id,
       caption:text,parse_mode:'HTML',reply_markup:keyboard});
@@ -52,12 +53,12 @@ export default async function (c) {
     if(keys.some(x=>x?.startsWith('vinyl:')))
       await editColorMenu(c.message,uid,next);
     else if(keys.some(x=>x?.startsWith('speed:')))
-      await edit(c.message,await tr('customize',next),await speedKeyboard(next,null,u.rotation));
+      await edit(c.message,settingsTitle(next),await speedKeyboard(next,null,u.rotation));
     else await edit(c.message,await tr('start',next)+(CONFIG.RENDERER_ENABLED?'':'\n\n'+await tr('renderer',next)),await startKeyboard(uid,next));
     await answer(c,next.toUpperCase());return;
   }
   if(data==='customize:open'){
-    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,u.rotation));await answer(c);return;
+    await edit(c.message,settingsTitle(lang),await speedKeyboard(lang,null,u.rotation));await answer(c);return;
   }
   if(data==='customize:back'){
     await edit(c.message,await tr('start',lang)+(CONFIG.RENDERER_ENABLED?'':'\n\n'+await tr('renderer',lang)),await startKeyboard(uid,lang));await answer(c);return;
@@ -68,20 +69,20 @@ export default async function (c) {
       try {
         await api.deleteMessage({chat_id:c.message.chat.id,message_id:c.message.message_id});
         await api.sendPhoto({chat_id:c.message.chat.id,photo:photo.value,
-          caption:await tr('color',lang),reply_markup:await colorKeyboard(uid,lang)});
+          caption:await tr('MSG_VINYL_COLOR_INFO',lang),reply_markup:await colorKeyboard(uid,lang)});
       } catch(error) {
         console.warn('Vinyl menu photo unavailable, showing text menu',String(error?.description||error));
-        await api.sendMessage({chat_id:c.message.chat.id,text:await tr('color',lang),
+        await api.sendMessage({chat_id:c.message.chat.id,text:await tr('MSG_VINYL_COLOR_INFO',lang),
           parse_mode:'HTML',reply_markup:await colorKeyboard(uid,lang)});
       }
-    }else await edit(c.message,await tr('color',lang),await colorKeyboard(uid,lang));
+    }else await editColorMenu(c.message,uid,lang);
     await answer(c);return;
   }
   if(data==='vinyl_menu:back'){
     if(c.message.photo?.length){
       try {await api.deleteMessage({chat_id:c.message.chat.id,message_id:c.message.message_id});}
       catch(error){console.warn('Could not remove color menu photo',String(error?.description||error));}
-      await api.sendMessage({chat_id:c.message.chat.id,text:await tr('customize',lang),
+      await api.sendMessage({chat_id:c.message.chat.id,text:settingsTitle(lang),
         parse_mode:'HTML',reply_markup:await speedKeyboard(lang,null,u.rotation)});
     }else await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,u.rotation));
     await answer(c);return;
@@ -100,7 +101,7 @@ export default async function (c) {
     const speed=data.slice(6);
     if(!SPEEDS.includes(speed)){await answer(c,'Invalid speed',true);return;}
     await updateUser(uid,{rotation:String(rotationSeconds(speed))});
-    await edit(c.message,await tr('customize',lang),await speedKeyboard(lang,null,String(rotationSeconds(speed))));
+    await edit(c.message,settingsTitle(lang),await speedKeyboard(lang,null,String(rotationSeconds(speed))));
     await answer(c,lang==='en'?'Saved':'✅ تم حفظ السرعة');return;
   }
   if(data==='buy_stars'){
