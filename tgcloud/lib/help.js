@@ -58,7 +58,7 @@ export async function sendHelp(message) {
 }
 export async function helpCallback(c,data){
   const uid=c.from.id;
-  if(!developer(uid)){await answer(c,'هذا الخيار للمطور فقط',true);return true;}
+  if(!developer(uid)){await answer(c,'هذا الخيار للمطور فقط',true);return 'answered';}
   if(data==='help_builder:menu'){await reply(c.message,'⚙️ اختر من أدناه:',editorMenu);return true;}
   if(data==='help_builder:settext'||data==='help_builder:addbtn'){
     await updateUser(uid,{pendingAction:data==='help_builder:settext'?'help:text':'help:button'});
@@ -74,7 +74,7 @@ export async function helpCallback(c,data){
   }
   if(data.startsWith('help_builder:remove:')){
     const index=Number(data.slice('help_builder:remove:'.length)),r=await draft(uid),b=buttons(r);
-    if(!Number.isSafeInteger(index)||index<0||index>=b.length){await answer(c,'زر غير موجود',true);return true;}
+    if(!Number.isSafeInteger(index)||index<0||index>=b.length){await answer(c,'زر غير موجود',true);return 'answered';}
     b.splice(index,1);
     await put(r.key,r.html,JSON.stringify(b),r.blocksJson);
     await reply(c.message,'✅ تم حذف الزر.',editorMenu);return true;
