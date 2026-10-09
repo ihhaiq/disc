@@ -56,15 +56,23 @@ export async function patchSession(key,patch) {
   await db.update(sessions).set(patch).where(eq(sessions.key,key)).run();
 }
 export async function deleteSession(key) { await db.delete(sessions).where(eq(sessions.key,key)).run(); }
+export async function recomputePremium(uid) {
+  // The immutable receipt ledger, not an incremental counter, is the source of truth.
+  // A process interruption between insert and account update is repaired on read.
+  const rows=await db.select().from(receipts).where(eq(receipts.userId,uid)).all();
+  rows.sort((a,b)=>(a.paidAt-b.paidAt)||a.chargeId.localeCompare(b.chargeId));
+  let expires=0;
+  for(const p of rows)expires=Math.max(expires,p.paidAt)+CONFIG.STARS_SUBSCRIPTION_DAYS*86400;
+  const u=await getUser(uid);
+  if(expires>u.premiumUntil) await db.update(users).set({premiumUntil:expires})
+    .where(eq(users.id,uid)).run();
+  return Math.max(expires,u.premiumUntil);
+}
 export async function addReceipt(payment,uid) {
-  // Atomic dedupe prevents duplicate Telegram update deliveries from extending premium twice.
   const chargeId = payment.telegram_payment_charge_id;
   if (!chargeId) return false;
   const r=await db.run('INSERT OR IGNORE INTO vinyl_star_receipts (charge_id,user_id,amount,paid_at) VALUES (:id,:uid,:amount,:ts)',
     {':id':chargeId, ':uid':uid, ':amount':payment.total_amount, ':ts':now()});
-  if (r.rowsAffected!==1) return false;
-  const user=await getUser(uid);
-  await db.update(users).set({premiumUntil:Math.max(now(),user.premiumUntil)+CONFIG.STARS_SUBSCRIPTION_DAYS*86400})
-    .where(eq(users.id,uid)).run();
-  return true;
+  await recomputePremium(uid); // safe on duplicates; recover from interrupted credits
+  return r.rowsAffected===1;
 }
