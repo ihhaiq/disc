@@ -5,10 +5,12 @@
   "type": "module",
   "description": "Telegram Serverless port of the Vinyl Bot Python backend",
   "scripts": {
-    "check": "node --check tgcloud/schema.js && node --check tgcloud/handlers/message.js && node --check tgcloud/handlers/callback_query.js",
+    "check": "node scripts/check-serverless.mjs && node --test tests/serverless/*.test.mjs",
     "status": "tgcloud status",
     "deploy": "tgcloud push",
-    "migrate": "tgcloud migrate"
+    "migrate": "tgcloud migrate",
+    "check:syntax": "node scripts/check-serverless.mjs",
+    "check:parity": "node --test tests/serverless/main-parity.test.mjs"
   },
   "devDependencies": {
     "@tgcloud/cli": "^0.2.0"
