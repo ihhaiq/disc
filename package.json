@@ -14,7 +14,8 @@
     "deploy": "tgcloud push",
     "migrate": "tgcloud migrate",
     "check:syntax": "node scripts/check-serverless.mjs",
-    "check:parity": "node --test tests/serverless/main-parity.test.mjs"
+    "check:parity": "node --test tests/serverless/main-parity.test.mjs",
+    "prepare:wasm-probe": "node scripts/prepare-wasm-encoder-probe.mjs"
   },
   "devDependencies": {
     "@tgcloud/cli": "0.2.0"

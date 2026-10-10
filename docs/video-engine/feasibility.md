@@ -35,7 +35,7 @@ Rechecked the official Serverless page and packaged SDK on 2026-10-09 during the
 
 ## Pure JavaScript encoding assessment
 
-PNG decoding, alpha composition, rotation and ISO BMFF muxing are individual engineering tasks. Muxing cannot substitute for valid elementary streams. Without working native codecs, a pure JS path would need a verified audio demuxer/decoder and AAC encoder plus a compressed AVC encoder. No such implementation is present or claimed here; no external renderer was introduced.
+PNG decoding, alpha composition, rotation and ISO BMFF muxing are individual engineering tasks. Muxing cannot substitute for valid elementary streams. Without working native codecs, a pure JS path would need a verified audio demuxer/decoder and AAC encoder plus a compressed AVC encoder. An isolated H264/AAC WASM prototype is now locally verified; it does not decode real user audio or integrate the production renderer. See [WASM candidate evidence](wasm-probe.md). No external renderer was introduced.
 
 Resource lower bounds at 640×640/30fps:
 
@@ -56,3 +56,7 @@ Thus retaining every frame is unsuitable. A simple AVC I_PCM strategy still carr
 4. Generate one second of a rotating 640×640 picture and valid audio within the isolate; independently decode and inspect tracks and timestamps; send it successfully with `sendVideoNote` on the chosen test bot.
 
 P1–P4 rendering work remains pending. Message/state logic can be tested independently under the revised task scope. Payments and the render gate remain disabled.
+
+## 2026-10-10 WASM feasibility progress
+
+The operator demonstrated synchronous empty WASM Module/Instance on Telegram; Canvas and WebCodecs were absent. A new isolated encoder candidate now produces a rotating synthetic one-second H264/AAC MP4 locally, with independent codec, rotation and tone validation in a V8 context without Node globals or string code generation. See [wasm-probe.md](wasm-probe.md) for exact measurements and pending evidence. A fresh remote CLI run is still blocked by absent CLI credentials in the managed environment. Gate A remains pending actual Telegram encoding, authorized delivery and independent inspection.

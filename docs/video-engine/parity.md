@@ -18,10 +18,10 @@ Local checks load the real ESM modules into independent VM contexts, substitute 
 | Payment receipts | Validated ownership/currency/amount, unique ledger, duplicate retry, imported-premium baseline, interrupted-credit repair and monotonic expiry updates | Actual payment updates pending; sales closed |
 | Usage limit/reset/exemptions | Local SQLite tests; render attempts never charged | Actual successful-render accounting pending |
 | Static module restrictions | Syntax/import checks for every deployable JS module | Actual SDK compilation pending |
-| Runtime capability discovery | Negative and native-support simulations; resource estimates | Blocked: no CLI account |
+| Runtime capability discovery | Negative/support simulations; operator reported synchronous WASM success and absent Canvas/WebCodecs | Full codec candidate run pending; agent CLI account absent |
 | Rotating disc composition / golden pixels | Not implemented in JS | Pending |
 | Real user audio decode/trim/AAC encode | Not implemented in JS | Pending |
-| H.264 encoder / ISO BMFF muxer | Not implemented in JS | Pending |
+| H.264 encoder / ISO BMFF muxer | Isolated WASM H264 + AAC candidate, JS audio muxer; independent local decode of a synthetic 1-second MP4 | Actual Telegram codec execution/send pending |
 | Three/sixty-second output, synchronization | No JS output to inspect | Pending |
 | `sendVideoNote` proof / Gate A / Gate B | No successful test | BLOCKED |
 | Original worker queue/cancellation/progress | No fake jobs introduced while renderer is absent | Pending renderer integration |

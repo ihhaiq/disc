@@ -51,3 +51,7 @@ The official reference remains [Telegram Serverless](https://blogfork.telegram.o
 ## 2026-10-10 local follow-up
 
 Windows test path handling was corrected (developer config injection and file URL conversion). POSIX permission-bit assertions are limited to POSIX platforms; Windows ACL behavior is not claimed verified. All 80 local tests and 20-module checks passed on Linux, not on a Windows runner. A fresh isolated platform probe still stopped before execution because no CLI access token is configured in the managed environment. Rendering and live Telegram parity remain unverified.
+
+## 2026-10-10 isolated codec candidate
+
+An isolated WASM experiment now creates a genuine 640×640/30fps, one-second H264/AAC MP4 locally. Independent decode verifies rotation and a synthetic tone, including audio priming correction. It runs in local V8 without Node globals or string code generation. It is not deployed or connected to the production bot and cannot yet process user audio or original vinyl assets. `npm run prepare:wasm-probe -- /absolute/new/directory` prepares it; [instructions and limitations](docs/video-engine/wasm-probe.md) distinguish local and Telegram evidence. All 83 tests pass locally. Actual Telegram codec execution remains blocked on this machine by missing CLI access credentials.
